@@ -11,14 +11,13 @@ env:
   ORG_ALIAS: "MBM_SIT_CI"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
   SIT_DEPLOYMENT_STYLE: ${{ vars.SIT_DEPLOYMENT_STYLE }}
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
   SIT_TESTRUN_ON_DEPLOYMENT: ${{ vars.SIT_TESTRUN_ON_DEPLOYMENT }}
   DEPLOY_DESTRUCTIVE_CHANGES: ${{ vars.SIT_DELTA_DEPLOY_DESTRUCTIVE_CHANGES }}
   SCRATCHORG_SNAPSHOT_RECREATE_FULL: false
   TARGET_ORG_TYPE: "DEVOPSSANDBOX"
-  DEPLOY_OO_FOLDERS: "TRUE"
-  DEPLOY_OH_FOLDERS: ${{ vars.SIT_DEPLOY_OH_FOLDERS }}
-  DEPLOY_CMP_FOLDERS: ${{ vars.SIT_DEPLOY_CMP_FOLDERS }}
+  DEPLOY_PRIMARY_SOURCE: "TRUE"
+  DEPLOY_SECONDARY_SOURCE: ${{ vars.SIT_DEPLOY_SECONDARY_SOURCE }}
+  DEPLOY_OPTIONAL_SOURCE: ${{ vars.SIT_DEPLOY_OPTIONAL_SOURCE }}
 
 jobs:
   checkDocsOnly:
@@ -111,25 +110,16 @@ jobs:
                 if [ $RELEVANT_DIR_CHANGED == 'TRUE' ]; then
                   .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $SIT_TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment $DEPLOY_DESTRUCTIVE_CHANGES
                 else 
-                  .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+                  .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
                 fi
               else
-                .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+                .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
               fi 
-              .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $SIT_TESTRUN_ON_DEPLOYMENT sourcepath fs_post_org-dependent/SIT
+              if [ -d "fs_post_org-dependent/SIT" ]; then
+                .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $SIT_TESTRUN_ON_DEPLOYMENT sourcepath fs_post_org-dependent/SIT
+              fi
           } 2>&1 | tee deploy.log
           
-      # Send Teams notification in case of failure
-      - name: Post Deployment Status to Teams
-        if: ${{ always() }}
-        run: |
-          if [ ${{ job.status }} == 'failure' ]; then
-            curl -X POST -H "Content-Type: application/json" -d '{
-              "text": "PR Merge: SIT deployment for https://git.i.mercedes-benz.com/mbfs-OneOps/T1224-OneOPS/pull/${{github.ref_name}} has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
-              "themeColor": "FF0000"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          fi
-
       # Check if changes are relevant for Scratch Org snapshot recreation
       - id: check-SO-snapshot-relevant-changes
         name: Check for SO Snapshot relevant changes
@@ -155,19 +145,3 @@ jobs:
     #if: ${{ needs.deployToSIT.outputs.SCRATCHORG_SNAPSHOT_RECREATE_FULL == 'true' }}
     #uses: ./.github/workflows/SO_SnapshotRecreation.yml
     #secrets: inherit
-
- 
-# Capture DORA deployment metrics (success/failure) and report to Datadog
-
-  Datadog-Report:
-    name: "Call Datadog Reporting"
-    needs:
-      - checkDocsOnly
-      - deployToSIT
-    if: ${{ always() && needs.checkDocsOnly.outputs.docs_only != 'TRUE' }}
-    uses: ./.github/workflows/Datadog_Report.yml
-    with:
-      deployment_status: ${{ needs.deployToSIT.result == 'success' && 'success' || 'failure' }}
-      environment: "SIT"
-    secrets: inherit
-

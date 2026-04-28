@@ -9,13 +9,12 @@ env:
   ORG_ALIAS: "MBM_devTEMPLAT_CI"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
   DEPLOYMENT_STYLE: ${{ vars.DEVTEMP_DEPLOYMENT_STYLE }}
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
   TESTRUN_ON_DEPLOYMENT: ${{ vars.DEVTEMP_TESTRUN_ON_DEPLOYMENT }}
   DEPLOY_DESTRUCTIVE_CHANGES: ${{ vars.DEVTEMP_DELTA_DEPLOY_DESTRUCTIVE_CHANGES }}
   TARGET_ORG_TYPE: "DEVOPSSANDBOX"
-  DEPLOY_OO_FOLDERS: "TRUE"
-  DEPLOY_OH_FOLDERS: "TRUE"
-  DEPLOY_CMP_FOLDERS: "TRUE"
+  DEPLOY_PRIMARY_SOURCE: "TRUE"
+  DEPLOY_SECONDARY_SOURCE: "TRUE"
+  DEPLOY_OPTIONAL_SOURCE: "TRUE"
 
 jobs:
   deployToDevTemplate:
@@ -72,24 +71,8 @@ jobs:
             if [ $RELEVANT_DIR_CHANGED == 'TRUE' ]; then
               .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment $DEPLOY_DESTRUCTIVE_CHANGES
             else 
-              .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+              .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
             fi
           else
-            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
           fi 
-
-      # Send Teams notification in case of failure
-      - name: Post Deployment Status to Teams
-        if: ${{ always() }}
-        run: |
-          if [ ${{ job.status }} == 'success' ]; then
-            curl -X POST -H "Content-Type: application/json" -d '{
-            "text": "devTemplate: Salesforce deployment to devTemplate org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
-            "themeColor": "0ed700"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          else
-            curl -X POST -H "Content-Type: application/json" -d '{
-              "text": "devTemplate: Salesforce deployment to devTemplate org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
-              "themeColor": "FF0000"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          fi

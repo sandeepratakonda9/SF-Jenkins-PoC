@@ -55,10 +55,10 @@ jobs:
       # Remove obsolete metadata to PREPROD
       - name: Remove obsolete metadata to PREPROD
         run: |
-          rm -r fs_post_org-dependent/OHqa
-          rm -r fs_post_org-dependent/SIT
-          rm -r fs_post_org-dependent/STAGE
-          rm -r fs_post_org-dependent/PROD/labels/CustomLabels.labels-meta.xml
+          rm -rf fs_post_org-dependent/OHqa
+          rm -rf fs_post_org-dependent/SIT
+          rm -rf fs_post_org-dependent/STAGE
+          rm -rf fs_post_org-dependent/PROD/labels/CustomLabels.labels-meta.xml
       
       # Validate against PREPROD
       - name: Validate against PREPROD

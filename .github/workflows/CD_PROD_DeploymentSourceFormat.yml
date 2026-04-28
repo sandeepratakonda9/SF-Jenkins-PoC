@@ -8,12 +8,11 @@ env:
   ORG_ALIAS: "MBM_PROD_CI"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
   RELEASE_VERSION: ${{ vars.RELEASE_VERSION }}
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
   DEPLOYMENT_STYLE: ${{ vars.PROD_DEPLOYMENT_STYLE }}
   TARGET_ORG_TYPE: ${{ vars.PROD_TARGET_ORG_TYPE }}
-  DEPLOY_OO_FOLDERS: ${{ vars.PROD_DEPLOY_OO_FOLDERS }}
-  DEPLOY_OH_FOLDERS: ${{ vars.PROD_DEPLOY_OH_FOLDERS }}
-  DEPLOY_CMP_FOLDERS: ${{ vars.PROD_DEPLOY_CMP_FOLDERS }}
+  DEPLOY_PRIMARY_SOURCE: ${{ vars.PROD_DEPLOY_PRIMARY_SOURCE }}
+  DEPLOY_SECONDARY_SOURCE: ${{ vars.PROD_DEPLOY_SECONDARY_SOURCE }}
+  DEPLOY_OPTIONAL_SOURCE: ${{ vars.PROD_DEPLOY_OPTIONAL_SOURCE }}
   TESTRUN_ON_DEPLOYMENT: ${{ vars.PROD_TESTRUN_ON_DEPLOYMENT }}
 
 jobs:
@@ -63,36 +62,22 @@ jobs:
             ls -R -l ./temp-delta-deployment
             .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment
           else
-            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
           fi
 
       # Org-specific folder deployment to PROD
       - name: Deploy org-specific folder to PROD
         id: PROD_post_deployment
         run: |
-          .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./fs_post_org-dependent/PROD
+          if [ -d "./fs_post_org-dependent/PROD" ]; then
+            .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./fs_post_org-dependent/PROD
+          fi
       
       # Tab branch on deployment success
       - name: Tag main branch with Release
         if: steps.PROD_deployment.outcome == 'success' && steps.PROD_post_deployment.outcome == 'success'
         run: |
           sudo apt-get install jq
-          git config --global user.email "ci.user@mercedes-benz.com"
+          git config --global user.email "sratakonda@deloitte.com"
           git config --global user.name "CI User"
           .deployment/scripts/tag.sh ProductionRelease $RELEASE_VERSION
-        
-      # Send Teams notification
-      - name: Post Deployment Status to Teams
-        if: ${{ always() }}
-        run: |
-          if [ ${{ job.status }} == 'success' ]; then
-            curl -X POST -H "Content-Type: application/json" -d '{
-            "text": "PROD: Salesforce deployment to Production org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
-            "themeColor": "0ed700"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          else
-            curl -X POST -H "Content-Type: application/json" -d '{
-              "text": "PROD: Salesforce deployment to Production org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
-              "themeColor": "FF0000"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          fi

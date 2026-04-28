@@ -13,7 +13,7 @@ sf plugins
 #echo -e "──────────────────────────────────────────────────────────────────────────\n\nScan code of Client Services ...\n\n──────────────────────────────────────────────────────────────────────────"
 #sf scanner run --format table --target fs_clientServices/main/default/classes --category '!Documentation' --verbose --severity-threshold 2
 #sf scanner run --format table --target fs_clientServices/main/default/lwc --category '!Documentation' --verbose --severity-threshold 2
-#echo -e "──────────────────────────────────────────────────────────────────────────\n\nScan code of OneHouse COP ...\n\n──────────────────────────────────────────────────────────────────────────"
+#echo -e "──────────────────────────────────────────────────────────────────────────\n\nScan code of additional components ...\n\n──────────────────────────────────────────────────────────────────────────"
 #sf scanner run --format table --target fs_ohCop/main/default/classes --category '!Documentation' --verbose --severity-threshold 2
 #sf scanner run --format table --target fs_ohCop/main/default/lwc --category '!Documentation' --verbose --severity-threshold 2
 

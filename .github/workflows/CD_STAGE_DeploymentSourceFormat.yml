@@ -4,18 +4,17 @@ on:
   push:
    branches: [ "stage" , "stage-*" ]
    tags:
-      - stage-deploy-OH/*
+      - stage-deploy/*
 
 env:
   SFDX_DISABLE_DNS_CHECK: true 
   ORG_ALIAS: "MBM_UAT_CI"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
   DEPLOYMENT_STYLE: ${{ vars.STAGE_DEPLOYMENT_STYLE }}
   TARGET_ORG_TYPE: ${{ vars.STAGE_TARGET_ORG_TYPE }}
-  DEPLOY_OO_FOLDERS: ${{ vars.STAGE_DEPLOY_OO_FOLDERS }}
-  DEPLOY_OH_FOLDERS: ${{ vars.STAGE_DEPLOY_OH_FOLDERS }}
-  DEPLOY_CMP_FOLDERS: ${{ vars.STAGE_DEPLOY_CMP_FOLDERS }}
+  DEPLOY_PRIMARY_SOURCE: ${{ vars.STAGE_DEPLOY_PRIMARY_SOURCE }}
+  DEPLOY_SECONDARY_SOURCE: ${{ vars.STAGE_DEPLOY_SECONDARY_SOURCE }}
+  DEPLOY_OPTIONAL_SOURCE: ${{ vars.STAGE_DEPLOY_OPTIONAL_SOURCE }}
   TESTRUN_ON_DEPLOYMENT: ${{ vars.STAGE_TESTRUN_ON_DEPLOYMENT }}
   DEVTEMPLATE_DEPLOYMENT: ${{ vars.DEVTEMPLATE_DEPLOYMENT }}
 
@@ -37,10 +36,10 @@ jobs:
 
       - name: Determine if triggered by tag push to deploy OH folder as well
         run: |
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/stage-deploy-OH/* ]]; then
-            echo "DEPLOY_OH_FOLDERS=TRUE" >> $GITHUB_ENV
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/stage-deploy/* ]]; then
+            echo "DEPLOY_SECONDARY_SOURCE=TRUE" >> $GITHUB_ENV
           fi
-          echo "DEPLOY_OH_FOLDERS is set to: $DEPLOY_OH_FOLDERS"
+          echo "DEPLOY_SECONDARY_SOURCE is set to: $DEPLOY_SECONDARY_SOURCE"
 
       # Install Salesforce CLI & sfdx-git-delta Plugin if needed 
       - name: 'Install Salesforce CLI'
@@ -76,34 +75,19 @@ jobs:
             ls -R -l ./temp-delta-deployment
             .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment ./temp-delta-deployment/destructiveChanges/destructiveChanges.xml
           else
-            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
           fi 
 
       # Org-specific folder deployment to STAGE
       - name: Deploy org-specific folder to STAGE
         run: |
-          .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./fs_post_org-dependent/STAGE
-      
-      # Send Teams notification
-      - name: Post Deployment Status to Teams
-        if: ${{ always() }}
-        run: |
-          if [ ${{ job.status }} == 'success' ]; then
-            curl -X POST -H "Content-Type: application/json" -d '{
-            "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
-            "themeColor": "0ed700"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          else
-            curl -X POST -H "Content-Type: application/json" -d '{
-              "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
-              "themeColor": "FF0000"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          if [ -d "./fs_post_org-dependent/STAGE" ]; then
+            .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./fs_post_org-dependent/STAGE
           fi
-
+      
   deployToDevTemplate:
     name: "Deploy to devTEMPLATE"
     needs: [deployToSTAGE]
     if: ${{ vars.DEVTEMPLATE_DEPLOYMENT }}
     uses: ./.github/workflows/CD_devTemplateDeployment.yml
     secrets: inherit
-

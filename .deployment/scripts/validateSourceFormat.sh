@@ -6,7 +6,7 @@ DIRTODEPLOY="$4"
 GITHUB_TOKEN="$5"
 GITHUB_NUMBER="$6"
 
-set -e
+set -euo pipefail
 
 # Debug output
 echo "=== Salesforce Deployment Script Debug ==="
@@ -82,7 +82,8 @@ if [ "$FORMAT" == 'sourcepath' ] && [ ! -z "$TESTLEVEL" ]; then
         
         LABELS_FILE="$DIRTODEPLOY/**/labels/CustomLabels.labels-meta.xml"
 
-        for f in $(ls $LABELS_FILE 2>/dev/null); do
+        # shellcheck disable=SC2044
+        for f in $(find "$DIRTODEPLOY" -type f -path "*/labels/CustomLabels.labels-meta.xml" 2>/dev/null); do
             if grep -q "<labels>" "$f" && ! grep -q "<fullName>" "$f"; then
                 echo "ERROR: CustomLabels file has <labels> but no <fullName>: $f"
                 exit 1
@@ -163,11 +164,12 @@ if [ -f "coverage/coverage/coverage-summary.json" ]; then
     
     if [ -n "$GITHUB_TOKEN" ] && [ -n "$GITHUB_NUMBER" ]; then
         echo "Posting coverage to GitHub PR #$GITHUB_NUMBER"
+        API_BASE_URL="${GITHUB_API_URL:-https://api.github.com}"
         curl -L \
           -X POST \
           -H "Accept: application/vnd.github+json" \
           -H "Authorization: Bearer $GITHUB_TOKEN" \
-          https://git.i.mercedes-benz.com/api/v3/repos/mbfs-OneOps/T1224-OneOPS/issues/$GITHUB_NUMBER/comments \
+          "$API_BASE_URL/repos/$GITHUB_REPOSITORY/issues/$GITHUB_NUMBER/comments" \
           -d "$(jq -n --arg body "FYI: the test coverage of the validation against SIT org is: $testRunCoverage%" '{ "body": $body }')"
     else
         echo "Skipping GitHub PR comment - missing GITHUB_TOKEN or GITHUB_NUMBER"

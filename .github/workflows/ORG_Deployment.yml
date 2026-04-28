@@ -9,9 +9,9 @@ env:
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
   ORG_VALIDATE_OR_DEPLOY: ${{ vars.ORG_VALIDATE_OR_DEPLOY }}
   TARGET_ORG_TYPE: "DEVOPSSANDBOX"
-  DEPLOY_OO_FOLDERS: "TRUE"
-  DEPLOY_OH_FOLDERS: "TRUE"
-  DEPLOY_CMP_FOLDERS: "TRUE"
+  DEPLOY_PRIMARY_SOURCE: "TRUE"
+  DEPLOY_SECONDARY_SOURCE: "TRUE"
+  DEPLOY_OPTIONAL_SOURCE: "TRUE"
 
 jobs:
   deployToTARGET_ORG:
@@ -53,5 +53,5 @@ jobs:
             .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS RunLocalTests sourcepath ./
           else
             echo "--- Starting DEPLOYMENT ---"
-            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
           fi

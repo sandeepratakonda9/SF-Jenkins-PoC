@@ -11,7 +11,6 @@ env:
   ORG_ALIAS: "MBM_PROD_CI"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
   SO_SNAPSHOT_SCOPE: ${{ vars.ScratchOrg_SNAPSHOT_SCOPE }} # values accepted are "plain" or anything else (ideally "full"). With "plain" the snapshot is only having managed packages installed.
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
 
 jobs:
   recreateScratchOrgSnapshot:
@@ -61,14 +60,3 @@ jobs:
       # Create new org snapshop
       - name: Recreate Org Snapshot based on created Scratch Org
         run: .deployment/scripts/scratchOrgs/scratchOrgSnapshotCreation.sh SO_SNAPSHOT $ORG_ALIAS $SO_SNAPSHOT_SCOPE
-
-      # Send Teams notification in case of failure
-      - name: Post Deployment Status to Teams
-        if: ${{ always() }}
-        run: |
-          if [ ${{ job.status }} == 'failure' ]; then
-            curl -X POST -H "Content-Type: application/json" -d '{
-              "text": "CI-Scratch Org Snapshot Recreation: Salesforce job to recreate the Scratch Org Snapshot completed: RECREATION FAILED. Job Status: ${{ job.status }}",
-              "themeColor": "FF0000"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          fi

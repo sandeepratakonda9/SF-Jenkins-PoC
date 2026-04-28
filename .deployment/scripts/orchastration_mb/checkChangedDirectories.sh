@@ -1,24 +1,24 @@
 #!/bin/bash
-set -e
-# List of required directories
-relevant_dirs=( "common_frameworks" "core_dm" "fs_dm" "fs_bl" "fs_retention" "fs_clientServices" "fs_credit" "fs_industryCloud" "fs_ivr" "fs_post_access-mgmt" "fs_post_config" "fs_post_ui" "fs_dealerMgmt" "fs_ohCop" "fs_ohCmp" "fs_athlon")
+set -euo pipefail
 
-# Check if "temp" directory exists
-if [ -d "./temp-delta-deployment" ]; then
-    # Check if at least one of the required directories exists inside "temp"
-    found=false
-    for dir in "${relevant_dirs[@]}"; do
-        if [ -d "./temp-delta-deployment/$dir" ]; then
-            found=true
-            break
-        fi
-    done
+DELTA_DIR="./temp-delta-deployment"
 
-    if $found; then
-        echo "TRUE"
-    else
-        echo "FALSE"
-    fi
-else
-    echo "FALSE"
+if [ ! -d "$DELTA_DIR" ] || [ ! -f "sfdx-project.json" ]; then
+  echo "FALSE"
+  exit 0
 fi
+
+mapfile -t package_dirs < <(jq -r '.packageDirectories[]?.path' sfdx-project.json | sed '/^null$/d')
+if [ "${#package_dirs[@]}" -eq 0 ]; then
+  echo "FALSE"
+  exit 0
+fi
+
+for dir in "${package_dirs[@]}"; do
+  if [ -d "$DELTA_DIR/$dir" ]; then
+    echo "TRUE"
+    exit 0
+  fi
+done
+
+echo "FALSE"

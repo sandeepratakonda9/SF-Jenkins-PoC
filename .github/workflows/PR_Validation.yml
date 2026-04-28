@@ -20,11 +20,10 @@ env:
   ORG_ALIAS_SCRATCH: MBM_SO_PR_${{ github.event.pull_request.number }}
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
   SIT_VALIDATION_STYLE: ${{ vars.SIT_VALIDATION_STYLE }}
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
   SO_SNAPSHOT_USAGE: ${{ vars.SO_SNAPSHOT_USAGE }}
-  DEPLOY_OO_FOLDERS: "TRUE"
-  DEPLOY_OH_FOLDERS: ${{ vars.PR_VALI_SO_DEPLOY_OH_FOLDERS }}
-  DEPLOY_CMP_FOLDERS: ${{ vars.PR_VALI_SO_DEPLOY_CMP_FOLDERS }}
+  DEPLOY_PRIMARY_SOURCE: "TRUE"
+  DEPLOY_SECONDARY_SOURCE: ${{ vars.PR_VALI_SO_DEPLOY_SECONDARY_SOURCE }}
+  DEPLOY_OPTIONAL_SOURCE: ${{ vars.PR_VALI_SO_DEPLOY_OPTIONAL_SOURCE }}
   KEEP_SCRATCH_ORG_OPEN: ${{ vars.PR_VALI_SO_USE_AS_REVIEW_ORG }} # Set to true if you want to keep the scratch org open after a successful deployment during PR validation
 
 jobs:
@@ -243,16 +242,16 @@ jobs:
           fi
 
       # Check if the branch is from OH COP and if yes, set the variable to true so that is deploys all folders
-      - name: Check branch name for OneHouse COP
+      - name: Check branch name for Extended COP
         if: env.SKIP_SCRATCH_ORG != 'true'
         run: |
           branch_name=${{ github.head_ref }}
-          echo "Checking if PR is from OneHouse ..."      
+          echo "Checking if PR is from Extended ..."      
           if [[ $branch_name == oh/COP* || $branch_name == oh/CHA* ]]; then
-            echo "Check done: PR is from OneHouse - Scratch orgs will deploy also OH-COP folder ..."
-            echo "DEPLOY_OH_FOLDERS=TRUE" >> $GITHUB_ENV
+            echo "Check done: PR is from Extended - Scratch orgs will deploy also OH-COP folder ..."
+            echo "DEPLOY_SECONDARY_SOURCE=TRUE" >> $GITHUB_ENV
           else
-            echo "Check done: PR is from OneOps - skipping OH-COP folder"
+            echo "Check done: PR is from Core - skipping OH-COP folder"
           fi
 
       # Create Scratch Org
@@ -278,7 +277,7 @@ jobs:
         if: env.SKIP_SCRATCH_ORG != 'true'
         run: | 
           echo "--- Starting Scratch Org metadata prep for OmniStudio supported org ... ---"
-          .deployment/scripts/orchastration_mb/pre-undeployableMetadata_scratchOrgs.sh SO_SUPPORTS_OMNI $DEPLOY_OH_FOLDERS
+          .deployment/scripts/orchastration_mb/pre-undeployableMetadata_scratchOrgs.sh SO_SUPPORTS_OMNI $DEPLOY_SECONDARY_SOURCE
           echo "--- Scratch Org metadata prep completed ! ---"
 
       # Deploy directories to Scratch Org
@@ -289,11 +288,11 @@ jobs:
           echo "STATIC_DIR_CHANGED is set to ${{ env.STATIC_DIR_CHANGED }}"
           if [ ${{ env.STATIC_DIR_CHANGED }} == 'TRUE' ]; then
             echo "--- Starting deployment of whole repository ... ---"
-            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH SCRATCHORGPLAIN $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH SCRATCHORGPLAIN $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
             echo "--- Scratch Org deployment completed ! ---"
           else 
             echo "--- Starting deployment of current metadata changes ... ---"
-            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH SCRATCHORGFULL $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH SCRATCHORGFULL $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
             echo "--- Scratch Org deployment completed ! ---"
           fi
 
@@ -309,21 +308,3 @@ jobs:
       - name: Delete Scratch org
         if: always() && steps.scratchOrgCreation.outcome == 'success' && (steps.deployToScratchOrg.outcome == 'failure' || env.KEEP_SCRATCH_ORG_OPEN != 'true')
         run: .deployment/scripts/scratchOrgDelete.sh $ORG_ALIAS_SCRATCH
-
-  #postToTeams: - not in use anymore due to change how teams handles webhooks - reactivate if you see use in it in the future // Adrian SF
-  #  name: "Post outcome to Teams"
-  #  needs: [validateAgainstSIT, validateAgainstScratchOrg]
-  #  runs-on: [self-hosted, aks-gha-runners]
-
-  #  steps:
-  #    - uses: actions/checkout@v3
-    # Send Teams notification
-  #    - name: Post Deployment Status to Teams
-  #      if: ${{ always() }}
-  #      run: |
-  #        if [ ${{ job.status }} == 'success' ]; then
-  #          curl -X POST -H "Content-Type: application/json" -d '{
-  #          "text": "PR Validation: SIT & Scratch org dry-runs for https://git.i.mercedes-benz.com/mbfs-OneOps/T1224-OneOPS/pull/${{github.ref_name}} by @${{ github.actor }} are completed: VALIDATION SUCCESSFUL. Job Status: ${{ job.status }}",
-  #          "themeColor": "0ed700"
-  #          }' $TEAMS_NOTIFICATIONS_WEBHOOK
-  #        fi

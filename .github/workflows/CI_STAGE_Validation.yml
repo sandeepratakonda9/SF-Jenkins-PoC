@@ -9,7 +9,6 @@ env:
   SFDX_DISABLE_DNS_CHECK: true 
   ORG_ALIAS: "MBM_UAT_CI"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
   TESTRUN_ON_VALIDATION: "RunLocalTests"
 
 jobs:
@@ -48,25 +47,8 @@ jobs:
       - name: Remove omni related metadata
         run: .deployment/scripts/orchastration_mb/pre-irrelevantMetadata_STAGE.sh validation
 
-      # Validate OneOps
-      - name: Validate OneOps against STAGE
+      # Validate package directories
+      - name: Validate package directories against STAGE
         run: |
-          echo "--- Validating OneOps owned components ---"
-          .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS NoTestRun sourcepath "core_dm common_frameworks fs_dm fs_bl fs_industryCloud/clientServices fs_clientServices fs_ivr fs_industryCloud/credit fs_credit fs_dealerMgmt fs_industryCloud/retention fs_retention fs_athlon fs_post_ui fs_post_config fs_post_access-mgmt"
-
-      # Validate OneHouse
-      - name: Validate OneHouse against STAGE
-        run: |
-          echo "--- Validating OneHouse owned components ---"
-          .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $TESTRUN_ON_VALIDATION sourcepath "fs_industryCloud/ohCop fs_industryCloud/ohCmp fs_ohCmp fs_ohCop"
-
-      # Send Teams notification in case of failure
-      #- name: Post Deployment Status to Teams
-      #  if: ${{ always() }}
-      #  run: |
-      #    if [ ${{ job.status }} == 'failure' ]; then
-      #      curl -X POST -H "Content-Type: application/json" -d '{
-      #        "text": "CI-STAGE: Salesforce dry-run deployment to STAGE org has completed: VALIDATION FAILED. Job Status: ${{ job.status }}",
-      #        "themeColor": "FF0000"
-      #      }' $TEAMS_NOTIFICATIONS_WEBHOOK
-      #    fi
+          echo "--- Validating package directories from sfdx-project.json ---"
+          .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $TESTRUN_ON_VALIDATION sourcepath ./

@@ -40,20 +40,4 @@ jobs:
         run: .deployment/scripts/orchastration_mb/deploy-dir-structure.sh FS_STAGE RunLocalTests
          # .deployment/scripts/orchastration_mb/post-deployment_STAGE.sh FS_STAGE RunLocalTests - avoid overriting of quicklinks for the moment
 
-      # Send Teams notification
-      - name: Post Deployment Status to Teams
-        if: ${{ always() }}
-        run: |
-          if [ ${{ job.status }} == 'success' ]; then
-            curl -X POST -H "Content-Type: application/json" -d '{
-            "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
-            "themeColor": "0ed700"
-            }' https://corpdir.webhook.office.com/webhookb2/34e9e84f-38a4-4b38-92f7-e995cefe314e@9652d7c2-1ccf-4940-8151-4a92bd474ed0/IncomingWebhook/8b6fc6e571ec499992a88fd996cf0222/92ca7124-e908-4274-9092-af7093f08545
-          else
-            curl -X POST -H "Content-Type: application/json" -d '{
-              "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
-              "themeColor": "FF0000"
-            }' https://corpdir.webhook.office.com/webhookb2/34e9e84f-38a4-4b38-92f7-e995cefe314e@9652d7c2-1ccf-4940-8151-4a92bd474ed0/IncomingWebhook/8b6fc6e571ec499992a88fd996cf0222/92ca7124-e908-4274-9092-af7093f08545
-          fi
-
       

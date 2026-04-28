@@ -10,9 +10,9 @@ env:
   PREPROD_ORG: ${{ vars.PREPROD_ORG }}
   DEPLOYMENT_STYLE: ${{ vars.PREPROD_DEPLOYMENT_STYLE }}
   TARGET_ORG_TYPE: ${{ vars.PREPROD_TARGET_ORG_TYPE }}
-  DEPLOY_OO_FOLDERS: ${{ vars.PREPROD_DEPLOY_OO_FOLDERS }}
-  DEPLOY_OH_FOLDERS: ${{ vars.PREPROD_DEPLOY_OH_FOLDERS }}
-  DEPLOY_CMP_FOLDERS: ${{ vars.PREPROD_DEPLOY_CMP_FOLDERS }}
+  DEPLOY_PRIMARY_SOURCE: ${{ vars.PREPROD_DEPLOY_PRIMARY_SOURCE }}
+  DEPLOY_SECONDARY_SOURCE: ${{ vars.PREPROD_DEPLOY_SECONDARY_SOURCE }}
+  DEPLOY_OPTIONAL_SOURCE: ${{ vars.PREPROD_DEPLOY_OPTIONAL_SOURCE }}
   TESTRUN_ON_DEPLOYMENT: ${{ vars.PREPROD_TESTRUN_ON_DEPLOYMENT }}
 
 jobs:
@@ -66,5 +66,5 @@ jobs:
             ls -R -l ./temp-delta-deployment
             .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment
           else
-            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
           fi

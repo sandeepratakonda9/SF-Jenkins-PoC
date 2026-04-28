@@ -11,7 +11,7 @@ set -e
 chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/scratchOrgs/*.sh && chmod +x .deployment/scripts/orgManagement/*.sh
 
 if [ $EXECUTE_ONETIME_CHANGES == 'TRUE' ]; then
-    echo "--- OneHouse onetime changes - included! ---"
+    echo "--- Additional onetime changes - included! ---"
     echo "--- Starting Permission Sets assignment ... ---"
     .deployment/scripts/deploySourceFormat.sh $ALIAS NoTestRun sourcepath fs_ohCop/main/default/permissionsets/EU_DigitalLendingAdmin.permissionset-meta.xml
     # Assign relevant User Permission Sets
@@ -29,7 +29,7 @@ if [ $EXECUTE_ONETIME_CHANGES == 'TRUE' ]; then
     .deployment/scripts/deploySourceFormat.sh $ALIAS NoTestRun sourcepath fs_manual_deployment/decisionMatrixDefinition/EU_CreditApproverMatrix.decisionMatrixDefinition-meta.xml
     git restore .forceignore
 else
-    echo "--- OneHouse onetime changes - ignored! ---"
+    echo "--- Additional onetime changes - ignored! ---"
 fi
 
 echo "--- Starting Deployment of Settings ... ---"
@@ -120,10 +120,10 @@ rm -rf fs_ohCop/main/default/customMetadata/Trigger_Action.EU_UpdateDCIStatusOnC
 .deployment/scripts/deploySourceFormat.sh $ALIAS NoTestRun "fs_bl/main/default/permissionsets/FS_VehicleandAssetLendingUser.permissionset-meta.xml fs_ohCop/main/default/permissionsets fs_ohCop/main/default/permissionsetgroups/EU_PERSONA_MBFS_Devops_Manager.permissionsetgroup-meta.xml" sourcepath      
 
 if [ $EXECUTE_ONETIME_CHANGES_2 == 'TRUE' ]; then
-    echo "--- OneHouse onetime changes - included! ---"
+    echo "--- Additional onetime changes - included! ---"
     sf org assign permset --name EU_PERSONA_MBFS_Devops_Manager --target-org $ALIAS
 else
-    echo "--- OneHouse onetime changes - ignored! ---"
+    echo "--- Additional onetime changes - ignored! ---"
 fi
 
 echo "--- Starting DEPLOYMENT of case assignment rules ---"

@@ -10,12 +10,11 @@ env:
   ORG_ALIAS: "MBM_SIT_CI"
   ORG_ALIAS_SCRATCH: "MBM_SCRATCH_VAL"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
-  SO_OH_VALIDATION: "TRUE"
+  SO_EXTENDED_VALIDATION: "TRUE"
   TARGET_ORG_TYPE: "SCRATCHORGPLAIN"
-  DEPLOY_OO_FOLDERS: "TRUE"
-  DEPLOY_OH_FOLDERS: "TRUE"
-  DEPLOY_CMP_FOLDERS: "TRUE"
+  DEPLOY_PRIMARY_SOURCE: "TRUE"
+  DEPLOY_SECONDARY_SOURCE: "TRUE"
+  DEPLOY_OPTIONAL_SOURCE: "TRUE"
 
 jobs:
   validateAgainstSIT:
@@ -52,17 +51,11 @@ jobs:
       - name: Authenticate to SIT
         run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS SIT_SFDX_URL.txt SetDefault
 
-      # Validate OneOps
-      - name: Validate OneOps
+      # Validate package directories
+      - name: Validate package directories
         run: |
-          echo "--- Validating OneOps owned components ---"
-          .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS NoTestRun sourcepath "core_dm common_frameworks fs_dm fs_bl fs_industryCloud/clientServices fs_clientServices fs_ivr fs_industryCloud/credit fs_credit fs_dealerMgmt fs_industryCloud/retention fs_retention fs_athlon fs_post_ui fs_post_config fs_post_access-mgmt"
-
-      # Validate OneHouse
-      - name: Validate OneHouse
-        run: |
-          echo "--- Validating OneHouse owned components ---"
-          .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS RunLocalTests sourcepath "fs_industryCloud/ohCop fs_industryCloud/ohCmp fs_ohCmp fs_ohCop"
+          echo "--- Validating package directories from sfdx-project.json ---"
+          .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS RunLocalTests sourcepath ./
           
   validateAgainstScratchOrg:
     name: Scratch Org dry-run
@@ -108,14 +101,14 @@ jobs:
       - name: Handling of undeployable metadata
         run: | 
           echo "--- Starting Scratch Org metadata prep for OmniStudio supported org ... ---"
-          .deployment/scripts/orchastration_mb/pre-undeployableMetadata_scratchOrgs.sh SO_SUPPORTS_OMNI $SO_OH_VALIDATION
+          .deployment/scripts/orchastration_mb/pre-undeployableMetadata_scratchOrgs.sh SO_SUPPORTS_OMNI $SO_EXTENDED_VALIDATION
           echo "--- Scratch Org metadata prep completed ! ---"
 
       # Deploy directories to Scratch Org
       - name: Deploy directories to Scratch Org
         run: | 
           echo "--- Starting deployment of whole repository ... ---"
-          .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+          .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH $TARGET_ORG_TYPE $DEPLOY_PRIMARY_SOURCE $DEPLOY_SECONDARY_SOURCE $DEPLOY_OPTIONAL_SOURCE
           echo "--- Scratch Org deployment completed ! ---"
 
       - name: Run Apex tests on Scratch Org
@@ -126,21 +119,3 @@ jobs:
       - name: Delete Scratch org
         if: always() && steps.scratchOrgCreation.outcome == 'success'
         run: .deployment/scripts/scratchOrgDelete.sh $ORG_ALIAS_SCRATCH
-
-  postToTeams:
-    name: "Post outcome to Teams"    
-    needs: [validateAgainstSIT, validateAgainstScratchOrg]
-    if: ${{ always() }}
-    runs-on: [self-hosted, aks-gha-runners]
-
-    steps:
-      - uses: actions/checkout@v3
-    # Send Teams notification
-      - name: Post Deployment Status to Teams
-        run: |
-          if [ ${{ job.status }} == 'failure' ]; then
-            curl -X POST -H "Content-Type: application/json" -d '{
-            "text": "Scheduled Validation: Full SIT & Scratch org dry-runs completed: VALIDATION FAILED. Job Status: ${{ job.status }}",
-            "themeColor": "0ed700"
-            }' $TEAMS_NOTIFICATIONS_WEBHOOK
-          fi

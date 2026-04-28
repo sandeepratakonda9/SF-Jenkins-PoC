@@ -13,18 +13,12 @@ PREFIX=$(echo "$COMMIT_MSG" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -
 echo "Detected prefix: '$PREFIX'"
 
 case "$PREFIX" in
-  oh)
-    TEAM="OneHouse-Salesforce"
-    ;;
-  credit|retention|ivr|clientservices|dealermgmt)
-    TEAM="OneOps"
-    ;;
-  *)
-    TEAM="unknown"
+  * )
+    TEAM="${PREFIX:-default-team}"
     ;;
 esac
 
-SERVICE_NAME="$TEAM"
+SERVICE_NAME="salesforce-deployment"
 
 mkdir -p .deployment/scripts
 {

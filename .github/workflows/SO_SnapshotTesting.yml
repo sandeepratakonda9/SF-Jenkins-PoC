@@ -9,7 +9,6 @@ env:
   ORG_ALIAS: "MBM_PROD_CI"
   SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
   SO_SNAPSHOT_SCOPE: "testing" # values accepted are "plain" or anything else (ideally "full"). With "plain" the snapshot is only having managed packages installed.
-  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
 
 jobs:
   recreateScratchOrgSnapshot:
