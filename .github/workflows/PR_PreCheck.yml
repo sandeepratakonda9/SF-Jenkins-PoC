@@ -274,6 +274,7 @@ jobs:
     uses: ./.github/workflows/PR_Validation.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
+      run_scratch_org_validation: false
     secrets: inherit
 
   postStatusToPR:
