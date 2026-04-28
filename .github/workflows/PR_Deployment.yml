@@ -22,7 +22,7 @@ env:
 jobs:
   checkDocsOnly:
     name: "Check if only docs/scripts changed"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.docs-check.outputs.docs_only }}
     
@@ -56,7 +56,7 @@ jobs:
     if: github.event.pull_request.merged == true && needs.checkDocsOnly.outputs.docs_only != 'TRUE'
     needs: [checkDocsOnly]
     name: "Deployment to SIT"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     outputs: 
       SCRATCHORG_SNAPSHOT_RECREATE_FULL: ${{ steps.check-SO-snapshot-relevant-changes.outputs.SCRATCHORG_SNAPSHOT_RECREATE_FULL }}
     environment: SIT

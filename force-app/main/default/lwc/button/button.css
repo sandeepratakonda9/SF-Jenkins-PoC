@@ -1,0 +1,23 @@
+:host {
+    --primary-color: #0088ce;
+    --button-hover-color: #005b9f;
+    --button-disabled-color: #b4b4b4;
+  }
+  
+  .slds-button {
+    background-color: var(--primary-color);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 8px 16px;
+    cursor: pointer;
+  }
+  
+  .slds-button:hover {
+    background-color: var(--button-hover-color);
+  }
+  
+  .slds-button[disabled] {
+    background-color: var(--button-disabled-color);
+    cursor: not-allowed;
+  }

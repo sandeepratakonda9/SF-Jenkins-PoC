@@ -5,6 +5,11 @@ on:
     branches:
       - develop
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 # Concurrency control: Cancel in-progress runs when new commits are pushed to the same PR
 # This prevents resource waste and ensures only the latest code is validated
 concurrency:
@@ -18,7 +23,7 @@ env:
 jobs:
   preCheckDocsOnly:
     name: "PreCheck: Check if only docs changed"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.docs-check.outputs.docs_only }}
     
@@ -50,7 +55,7 @@ jobs:
 
   preCheckScripts:
     name: "PreCheck: Verify Guidelines"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     
     steps:
       - uses: actions/checkout@v3
@@ -75,7 +80,7 @@ jobs:
 
   # preCheckDuplicates:
   #   name: "PreChecks: Verfiy duplicate Files"
-  #   runs-on: [self-hosted, aks-gha-runners]
+  #   runs-on: ubuntu-latest
     
   #   steps:
   #     - uses: actions/checkout@v3
@@ -97,7 +102,7 @@ jobs:
 
   preCheckPrettier:
     name: "PreCheck: Verify Prettier"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     needs: preCheckDocsOnly
     if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
 
@@ -133,7 +138,7 @@ jobs:
 
   preCheckFlowAndCode:
     name: "PreCheck: Scan all Flows & Code"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     needs: preCheckDocsOnly
     if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
     
@@ -173,7 +178,7 @@ jobs:
 
   preCheckCode:
     name: "PreCheck: Scan changed Code"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     needs: preCheckDocsOnly
     if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
     
@@ -225,7 +230,7 @@ jobs:
   
   preCheckNamingConventions:
     name: "PreCheck: Check Naming Conventions"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     needs: preCheckDocsOnly
     if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
     
@@ -274,12 +279,13 @@ jobs:
     uses: ./.github/workflows/PR_Validation.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
+      run_scratch_org_validation: false
     secrets: inherit
 
   postStatusToPR:
     name: "Post Status to PR"
     needs: [preCheckScripts, preCheckPrettier, preCheckFlowAndCode, preCheckCode, preCheckNamingConventions, preCheckDocsOnly, validate]
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     # Run always, but skip if workflow was cancelled (new commit pushed)
     if: always() && !contains(needs.*.result, 'cancelled')
     

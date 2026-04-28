@@ -19,7 +19,7 @@ env:
 jobs:
   validateAgainstSIT:
     name: SIT dry-run
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
@@ -59,7 +59,7 @@ jobs:
           
   validateAgainstScratchOrg:
     name: Scratch Org dry-run
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3

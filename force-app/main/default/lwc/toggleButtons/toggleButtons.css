@@ -1,0 +1,7 @@
+:host {
+  --font-color: #fff;
+}
+
+.slds-toggle-label {
+  color: var(--font-color);
+}

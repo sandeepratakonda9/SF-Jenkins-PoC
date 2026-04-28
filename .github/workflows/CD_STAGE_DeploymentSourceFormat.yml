@@ -21,7 +21,7 @@ env:
 jobs:
   deployToSTAGE:
     name: "Deploy to STAGE"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     environment: STAGE
 
     steps:

@@ -19,7 +19,7 @@ env:
 jobs:
   deployToDevTemplate:
     name: "Deploy to devTEMPLATE"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     environment: devTEMPLATE
 
     steps:

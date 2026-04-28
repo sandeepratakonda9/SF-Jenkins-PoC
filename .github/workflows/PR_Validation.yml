@@ -7,6 +7,11 @@ on:
         description: 'Pull request number'
         required: true
         type: number
+      run_scratch_org_validation:
+        description: 'Run scratch org validation job'
+        required: false
+        type: boolean
+        default: true
 
 # Concurrency control: Cancel in-progress runs when new commits are pushed to the same PR
 # This prevents resource waste and ensures only the latest code is validated
@@ -29,7 +34,7 @@ env:
 jobs:
   validateAgainstSIT:
     name: SIT dry-run
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     # Job-level concurrency: Only one SIT validation per PR at a time
     concurrency:
       group: sit-validation-${{ inputs.pr_number }}
@@ -132,7 +137,8 @@ jobs:
 
   validateAgainstScratchOrg:
     name: Scratch Org dry-run
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run_scratch_org_validation }}
     # Job-level concurrency: Only one Scratch Org validation per PR at a time
     concurrency:
       group: scratch-org-validation-${{ inputs.pr_number }}
