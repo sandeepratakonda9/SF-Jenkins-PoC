@@ -3,13 +3,14 @@
 # Exit immediately if any command exits with a non-zero status
 set -e
 
-# Temp remove irrelevant directories as the description rule was not applied on them
-rm -r .deployment/files
-rm -r core_dm
-rm -r fs_dm/main/default/tabs/et4ae5__IndividualEmailResult__c.tab-meta.xml
-rm -r fs_dealerMgmt
-rm -r fs_ohCop/main/default/experiences
-rm -r fs_ohCmp/fs_collections/main/default/experiences
+# Temp remove irrelevant paths where the description rule is not applied.
+# Use -f so missing legacy paths in demo repos do not fail prechecks.
+rm -rf .deployment/files \
+  core_dm \
+  fs_dm/main/default/tabs/et4ae5__IndividualEmailResult__c.tab-meta.xml \
+  fs_dealerMgmt \
+  fs_ohCop/main/default/experiences \
+  fs_ohCmp/fs_collections/main/default/experiences
 
 
 invalid_files=""
