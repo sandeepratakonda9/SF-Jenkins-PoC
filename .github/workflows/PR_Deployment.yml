@@ -1,0 +1,173 @@
+name: 'Pull Requests: SIT deployment on PR merge'
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  ORG_ALIAS: "MBM_SIT_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  SIT_DEPLOYMENT_STYLE: ${{ vars.SIT_DEPLOYMENT_STYLE }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+  SIT_TESTRUN_ON_DEPLOYMENT: ${{ vars.SIT_TESTRUN_ON_DEPLOYMENT }}
+  DEPLOY_DESTRUCTIVE_CHANGES: ${{ vars.SIT_DELTA_DEPLOY_DESTRUCTIVE_CHANGES }}
+  SCRATCHORG_SNAPSHOT_RECREATE_FULL: false
+  TARGET_ORG_TYPE: "DEVOPSSANDBOX"
+  DEPLOY_OO_FOLDERS: "TRUE"
+  DEPLOY_OH_FOLDERS: ${{ vars.SIT_DEPLOY_OH_FOLDERS }}
+  DEPLOY_CMP_FOLDERS: ${{ vars.SIT_DEPLOY_CMP_FOLDERS }}
+
+jobs:
+  checkDocsOnly:
+    name: "Check if only docs/scripts changed"
+    runs-on: [self-hosted, aks-gha-runners]
+    outputs:
+      docs_only: ${{ steps.docs-check.outputs.docs_only }}
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Check if only .deployment/ or .github/ changed
+      - name: Check if only docs/scripts changed
+        id: docs-check
+        run: |
+          result=$(.deployment/scripts/orchastration_mb/checkDocsOnlyChanges.sh "HEAD~1" "HEAD")
+          echo "docs_only=$result" >> $GITHUB_OUTPUT
+          if [ "$result" == "TRUE" ]; then
+            echo "Only .deployment/ or .github/ changed - deployment will be skipped"
+          else
+            echo "Code changes detected - deployment will proceed"
+          fi
+
+  deployToSIT:
+    if: github.event.pull_request.merged == true && needs.checkDocsOnly.outputs.docs_only != 'TRUE'
+    needs: [checkDocsOnly]
+    name: "Deployment to SIT"
+    runs-on: [self-hosted, aks-gha-runners]
+    outputs: 
+      SCRATCHORG_SNAPSHOT_RECREATE_FULL: ${{ steps.check-SO-snapshot-relevant-changes.outputs.SCRATCHORG_SNAPSHOT_RECREATE_FULL }}
+    environment: SIT
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          if [ $SIT_DEPLOYMENT_STYLE == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Handle irrelevant metadata against SIT org
+      - name: Handle irrelevant metadata
+        run: .deployment/scripts/orchastration_mb/pre-irrelevantMetadata_SIT.sh deployment
+      
+      # Store secret for SIT
+      - name: Populate auth file with SIT_SFDX_URL secret
+        run: echo ${{ secrets.SIT_SFDX_URL}} > ./SIT_SFDX_URL.txt
+      
+      # Authenticate to SIT
+      - name: Authenticate to SIT
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS SIT_SFDX_URL.txt SetDefault
+
+      # Deploy to SIT
+      - name: Deploy to SIT
+        id: deploy
+        run: |
+          set -o pipefail
+          {
+              if [ $SIT_DEPLOYMENT_STYLE == 'delta' ]; then
+                mkdir ./temp-delta-deployment
+                sf sgd source delta --from "HEAD~1" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+                ls -R -l ./temp-delta-deployment
+                RELEVANT_DIR_CHANGED=$(.deployment/scripts/orchastration_mb/checkChangedDirectories.sh)
+                if [ $RELEVANT_DIR_CHANGED == 'TRUE' ]; then
+                  .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $SIT_TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment $DEPLOY_DESTRUCTIVE_CHANGES
+                else 
+                  .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+                fi
+              else
+                .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+              fi 
+              .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $SIT_TESTRUN_ON_DEPLOYMENT sourcepath fs_post_org-dependent/SIT
+          } 2>&1 | tee deploy.log
+          
+      # Send Teams notification in case of failure
+      - name: Post Deployment Status to Teams
+        if: ${{ always() }}
+        run: |
+          if [ ${{ job.status }} == 'failure' ]; then
+            curl -X POST -H "Content-Type: application/json" -d '{
+              "text": "PR Merge: SIT deployment for https://git.i.mercedes-benz.com/mbfs-OneOps/T1224-OneOPS/pull/${{github.ref_name}} has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
+              "themeColor": "FF0000"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          fi
+
+      # Check if changes are relevant for Scratch Org snapshot recreation
+      - id: check-SO-snapshot-relevant-changes
+        name: Check for SO Snapshot relevant changes
+        run: |
+          SO_RELEVANT_DIR_CHANGED=$(.deployment/scripts/scratchOrgs/scratchOrgCheckChangedDirectories.sh)
+          if [ $SO_RELEVANT_DIR_CHANGED == 'TRUE' ]; then
+            echo "SCRATCHORG_SNAPSHOT_RECREATE_FULL=true" >> "$GITHUB_OUTPUT"
+            echo "--- Scratch Org snapshot recreation will be triggered! ---"
+          else 
+            echo "--- Scratch Org snapshot recreation will NOT be triggered! ---"
+          fi
+
+      - name: Upload validation log
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: deploy-log
+          path: deploy.log
+
+  #recreateOrgSnapshot:
+    #name: "Recreate Scratch Org Snapshot with static directories"
+    #needs: [deployToSIT]
+    #if: ${{ needs.deployToSIT.outputs.SCRATCHORG_SNAPSHOT_RECREATE_FULL == 'true' }}
+    #uses: ./.github/workflows/SO_SnapshotRecreation.yml
+    #secrets: inherit
+
+ 
+# Capture DORA deployment metrics (success/failure) and report to Datadog
+
+  Datadog-Report:
+    name: "Call Datadog Reporting"
+    needs:
+      - checkDocsOnly
+      - deployToSIT
+    if: ${{ always() && needs.checkDocsOnly.outputs.docs_only != 'TRUE' }}
+    uses: ./.github/workflows/Datadog_Report.yml
+    with:
+      deployment_status: ${{ needs.deployToSIT.result == 'success' && 'success' || 'failure' }}
+      environment: "SIT"
+    secrets: inherit
+

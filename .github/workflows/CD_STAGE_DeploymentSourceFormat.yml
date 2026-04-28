@@ -1,0 +1,109 @@
+name: 'CD: STAGE - Deployment'
+
+on:
+  push:
+   branches: [ "stage" , "stage-*" ]
+   tags:
+      - stage-deploy-OH/*
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  ORG_ALIAS: "MBM_UAT_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+  DEPLOYMENT_STYLE: ${{ vars.STAGE_DEPLOYMENT_STYLE }}
+  TARGET_ORG_TYPE: ${{ vars.STAGE_TARGET_ORG_TYPE }}
+  DEPLOY_OO_FOLDERS: ${{ vars.STAGE_DEPLOY_OO_FOLDERS }}
+  DEPLOY_OH_FOLDERS: ${{ vars.STAGE_DEPLOY_OH_FOLDERS }}
+  DEPLOY_CMP_FOLDERS: ${{ vars.STAGE_DEPLOY_CMP_FOLDERS }}
+  TESTRUN_ON_DEPLOYMENT: ${{ vars.STAGE_TESTRUN_ON_DEPLOYMENT }}
+  DEVTEMPLATE_DEPLOYMENT: ${{ vars.DEVTEMPLATE_DEPLOYMENT }}
+
+jobs:
+  deployToSTAGE:
+    name: "Deploy to STAGE"
+    runs-on: [self-hosted, aks-gha-runners]
+    environment: STAGE
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      - name: Determine if triggered by tag push to deploy OH folder as well
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/stage-deploy-OH/* ]]; then
+            echo "DEPLOY_OH_FOLDERS=TRUE" >> $GITHUB_ENV
+          fi
+          echo "DEPLOY_OH_FOLDERS is set to: $DEPLOY_OH_FOLDERS"
+
+      # Install Salesforce CLI & sfdx-git-delta Plugin if needed 
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          if [ $DEPLOYMENT_STYLE == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+
+      # Store secret for STAGE
+      - name: Populate auth file with STAGE_SFDX_URL secret
+        run: echo ${{ secrets.STAGE_SFDX_URL}} > ./STAGE_SFDX_URL.txt
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Handle irrelevant metadata against SIT org
+      - name: Handle irrelevant metadata
+        run: .deployment/scripts/orchastration_mb/pre-irrelevantMetadata_STAGE.sh deployment
+      
+      # Authenticate to STAGE
+      - name: Authenticate to STAGE
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS STAGE_SFDX_URL.txt SetDefault
+      
+      # Deploy to STAGE
+      - name: Deploy to STAGE
+        run: |
+          if [ $DEPLOYMENT_STYLE == 'delta' ]; then
+            mkdir ./temp-delta-deployment
+            sf sgd source delta --from $(git describe --abbrev=0) --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+            ls -R -l ./temp-delta-deployment
+            .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment ./temp-delta-deployment/destructiveChanges/destructiveChanges.xml
+          else
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+          fi 
+
+      # Org-specific folder deployment to STAGE
+      - name: Deploy org-specific folder to STAGE
+        run: |
+          .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./fs_post_org-dependent/STAGE
+      
+      # Send Teams notification
+      - name: Post Deployment Status to Teams
+        if: ${{ always() }}
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            curl -X POST -H "Content-Type: application/json" -d '{
+            "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
+            "themeColor": "0ed700"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          else
+            curl -X POST -H "Content-Type: application/json" -d '{
+              "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
+              "themeColor": "FF0000"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          fi
+
+  deployToDevTemplate:
+    name: "Deploy to devTEMPLATE"
+    needs: [deployToSTAGE]
+    if: ${{ vars.DEVTEMPLATE_DEPLOYMENT }}
+    uses: ./.github/workflows/CD_devTemplateDeployment.yml
+    secrets: inherit
+

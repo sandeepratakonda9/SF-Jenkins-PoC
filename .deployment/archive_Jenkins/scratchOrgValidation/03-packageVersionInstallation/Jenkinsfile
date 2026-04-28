@@ -1,0 +1,65 @@
+@Library('dot-shared-lib@v3.3.2') _
+pipeline {
+
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+    }
+
+    environment {
+        PROJECT_NAME = 'T1224-OneOPS'
+        PROJECT_TEAM = 'myteam'
+        REGISTRY = 'registry.app.corpintra.net'
+        SERVER_KEY_FILE = credentials('SF_SERVER_KEY')
+        CI_USER_PROD = credentials('CI_USER_PROD')
+        CLIENTID_PROD = credentials('CLIENTID_PROD')
+        URL_PROD = credentials('URL_PROD')
+        API_VERSION = credentials('API_VERSION')
+        INSTALLATIONKEY = credentials('INSTALLATION_KEY')
+        SFDX_DISABLE_DNS_CHECK = true 
+    }
+
+    agent any
+
+    stages {
+        stage('Set Up Environment') {
+            steps {
+                setEnv(enableStatistics: false)
+            }
+        }
+        stage('Package installation testing') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_PROD $CI_USER_PROD FS_PROD $SERVER_KEY_FILE $URL_PROD SetAsDefaultDEVHUB"
+                    sh ".deployment/scripts/scratchOrgCreate.sh FS_SO_CI_TEST FS_PROD true"
+                    sh ".deployment/scripts/orchastration_mb/packageInstallLatest.sh FS_SO_CI_TEST $INSTALLATIONKEY"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_core.sh FS_SO_CI_TEST RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_com.sh FS_SO_CI_TEST RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_fs.sh FS_SO_CI_TEST RunLocalTests"
+                    sh ".deployment/scripts/apexTestRun.sh FS_SO_CI_TEST RunSpecifiedTests"
+                    sh ".deployment/scripts/scratchOrgDelete.sh FS_SO_CI_TEST"
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+            dir("${env.WORKSPACE}@tmp") {
+                deleteDir()
+            }
+        }
+    }
+
+}

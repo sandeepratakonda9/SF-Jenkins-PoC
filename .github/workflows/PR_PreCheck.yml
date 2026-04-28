@@ -1,0 +1,353 @@
+name: "Pull Requests"
+
+on:
+  pull_request:
+    branches:
+      - develop
+
+# Concurrency control: Cancel in-progress runs when new commits are pushed to the same PR
+# This prevents resource waste and ensures only the latest code is validated
+concurrency:
+  group: pr-precheck-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+
+jobs:
+  preCheckDocsOnly:
+    name: "PreCheck: Check if only docs changed"
+    runs-on: [self-hosted, aks-gha-runners]
+    outputs:
+      docs_only: ${{ steps.docs-check.outputs.docs_only }}
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Check if only .deployment/ or .github/ changed
+      - name: Check if only docs/scripts changed
+        id: docs-check
+        run: |
+          result=$(.deployment/scripts/orchastration_mb/checkDocsOnlyChanges.sh)
+          echo "docs_only=$result" >> $GITHUB_OUTPUT
+          if [ "$result" == "TRUE" ]; then
+            echo "Only .deployment/ or .github/ changed - validation workflow will be skipped"
+          else
+            echo "Code changes detected - validation workflow will run"
+          fi
+
+  preCheckScripts:
+    name: "PreCheck: Verify Guidelines"
+    runs-on: [self-hosted, aks-gha-runners]
+    
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/preChecks/*.sh
+
+      - name: Check Branch and PR naming
+        run: .deployment/scripts/preChecks/checkBranchAndPRnaming.sh ${{ github.token }} ${{ github.event.pull_request.number }}
+      
+      - name: Check if assign_directory is empty
+        run: .deployment/scripts/preChecks/checkEmptyDirectory.sh assign_directory/main/default
+
+      - name: Check XML files for description
+        run: .deployment/scripts/preChecks/checkMetadataDescriptions.sh
+
+  # preCheckDuplicates:
+  #   name: "PreChecks: Verfiy duplicate Files"
+  #   runs-on: [self-hosted, aks-gha-runners]
+    
+  #   steps:
+  #     - uses: actions/checkout@v3
+
+  #     - id: setup-node
+  #       uses: actions/setup-node@v3
+  #       with:
+  #         node-version: '18.x'
+
+  #     # Make scripts executable
+  #     - name: Make scripts executable
+  #       run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/preChecks/*.sh
+
+  #     - name: Install find
+  #       run:  sudo npm install -g fd-find
+
+  #     - name: Check for Duplicate files
+  #       run: .deployment/scripts/preChecks/findduplicates.sh
+
+  preCheckPrettier:
+    name: "PreCheck: Verify Prettier"
+    runs-on: [self-hosted, aks-gha-runners]
+    needs: preCheckDocsOnly
+    if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      - name: Install Salesforce CLI
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          echo 'y' | sf plugins install sfdx-git-delta
+
+      - name: Generate delta for Prettier check
+        run: |
+          mkdir ./temp-delta-deployment
+          sf sgd source delta --from "origin/develop" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+
+      - name: Install Prettier dependencies
+        run: npm install --save-dev --save-exact prettier prettier-plugin-apex
+
+      - name: Make Prettier script executable
+        run: chmod +x .deployment/scripts/preChecks/prettierDelta.sh
+
+      - name: Run Prettier on changed files
+        run: .deployment/scripts/preChecks/prettierDelta.sh ./temp-delta-deployment
+
+  preCheckFlowAndCode:
+    name: "PreCheck: Scan all Flows & Code"
+    runs-on: [self-hosted, aks-gha-runners]
+    needs: preCheckDocsOnly
+    if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
+    
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/preChecks/*.sh
+
+      # Install Salesforce CLI
+      - name: Install Salesforce CLI
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+
+      # install Salesforce Lightning Flow Scanner Plugin - https://github.com/Force-Config-Control/lightning-flow-scanner-sfdx
+      #- name: Install Salesforce Lightning Flow Scanner Plugin
+      #  run: echo 'y' | sfdx plugins:install lightning-flow-scanner
+
+      # install Salesforce Code Analyzer Plugin - https://github.com/forcedotcom/sfdx-scanner/
+      - name: Install Salesforce Code Analyzer Plugin
+        run: echo 'y' | sf plugins install code-analyzer
+
+      # Scan flows before starting validation
+      #- name: Scan flows
+      #  run: .deployment/scripts/preChecks/scannerFlow.sh
+
+      # Scan Code before starting validation
+      - name: Scan code
+        run: .deployment/scripts/preChecks/scannerCode.sh
+
+  preCheckCode:
+    name: "PreCheck: Scan changed Code"
+    runs-on: [self-hosted, aks-gha-runners]
+    needs: preCheckDocsOnly
+    if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          echo 'y' | sf plugins install sfdx-git-delta
+        
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/preChecks/*.sh
+
+      # install Salesforce Code Analyzer Plugin - https://github.com/forcedotcom/sfdx-scanner/
+      - name: Install Salesforce Code Analyzer Plugin
+        run: echo 'y' | sf plugins install code-analyzer
+      
+      # Generate delta to run only on delta objects
+      - name: Generate delta & identify changed dirs
+        run: |
+          mkdir ./temp-delta-deployment
+          sfdx sgd:source:delta --from "origin/develop" --to "HEAD" --output ./temp-delta-deployment --generate-delta --ignore .sgdeltaignore
+
+      # List files in temp delta
+      - name: List files in temp-delta-deployment
+        run: |
+          echo "The following files are present in temp-delta-deployment:"
+          ls -R ./temp-delta-deployment
+      
+      # Handle irrelevant metadata against ScanCode
+      - name: Handle irrelevant metadata ScanCode
+        run: .deployment/scripts/orchastration_mb/pre-unScannableMetadata_CodeScan.sh
+      
+      # Run the scanner only on the changed files
+      - name: Run Code Scanner on Changed Files
+        run: |
+          .deployment/scripts/preChecks/scannerCodeDelta.sh ./temp-delta-deployment
+  
+  preCheckNamingConventions:
+    name: "PreCheck: Check Naming Conventions"
+    runs-on: [self-hosted, aks-gha-runners]
+    needs: preCheckDocsOnly
+    if: needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          echo 'y' | sfdx plugins:install sfdx-git-delta
+        
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/preChecks/*.sh
+
+      # Generate delta to run only on delta objects
+      - name: Generate delta & identify changed dirs
+        run: |
+          mkdir ./temp-delta-deployment
+          sf sgd source delta --from "origin/develop" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+
+      # List files in temp delta
+      - name: List files in temp-delta-deployment
+        run: |
+          echo "The following files are present in temp-delta-deployment:"
+          ls -R ./temp-delta-deployment
+
+      # Check XML files for namingconvention of changed files
+      # - name: Check XML files for namingconvention
+      #   run: |
+      #     .deployment/scripts/preChecks/checkMetadataForPrefix.sh ./temp-delta-deployment
+
+  validate:
+    name: "Org validation"
+    needs: [preCheckScripts, preCheckPrettier, preCheckFlowAndCode, preCheckCode, preCheckNamingConventions, preCheckDocsOnly]
+    if: github.event.pull_request.base.ref == 'develop' && needs.preCheckDocsOnly.outputs.docs_only != 'TRUE'
+    uses: ./.github/workflows/PR_Validation.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets: inherit
+
+  postStatusToPR:
+    name: "Post Status to PR"
+    needs: [preCheckScripts, preCheckPrettier, preCheckFlowAndCode, preCheckCode, preCheckNamingConventions, preCheckDocsOnly, validate]
+    runs-on: [self-hosted, aks-gha-runners]
+    # Run always, but skip if workflow was cancelled (new commit pushed)
+    if: always() && !contains(needs.*.result, 'cancelled')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Post comment to PR
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const docsOnly = "${{ needs.preCheckDocsOnly.outputs.docs_only }}" === "TRUE";
+            const preCheckScriptsResult = "${{ needs.preCheckScripts.result }}";
+            const prettierResult = "${{ needs.preCheckPrettier.result }}";
+            const flowAndCodeResult = "${{ needs.preCheckFlowAndCode.result }}";
+            const codeResult = "${{ needs.preCheckCode.result }}";
+            const namingResult = "${{ needs.preCheckNamingConventions.result }}";
+            const validateResult = "${{ needs.validate.result }}";
+            
+            let message = "";
+            let allPassed = true;
+            
+            // Check if all jobs passed
+            if (preCheckScriptsResult !== "success") allPassed = false;
+            if (!docsOnly) {
+              if (prettierResult !== "success" && prettierResult !== "skipped") allPassed = false;
+              if (flowAndCodeResult !== "success" && flowAndCodeResult !== "skipped") allPassed = false;
+              if (codeResult !== "success" && codeResult !== "skipped") allPassed = false;
+              if (namingResult !== "success" && namingResult !== "skipped") allPassed = false;
+              if (validateResult !== "success" && validateResult !== "skipped") allPassed = false;
+            }
+            
+            if (allPassed) {
+              if (docsOnly) {
+                message = `✅ **Pre-Check Completed Successfully!**\n\n`;
+                message += `📄 Only documentation/scripts changed - code validation was skipped.\n\n`;
+                message += `All checks passed:\n`;
+                message += `- ✅ Pre-check scripts passed\n\n`;
+                message += `Your PR is ready for review! 🚀`;
+              } else {
+                message = `✅ **Pre-Check & Validation Completed Successfully!**\n\n`;
+                message += `All checks passed:\n`;
+                message += `- ✅ Pre-check scripts passed\n`;
+                message += `- ✅ Prettier validation passed\n`;
+                message += `- ✅ Flow & code scanning passed\n`;
+                message += `- ✅ Changed code scanning passed\n`;
+                message += `- ✅ Naming conventions passed\n`;
+                message += `- ✅ Salesforce validation passed\n\n`;
+                message += `Your PR is ready for review! 🚀`;
+              }
+            } else {
+              message = `❌ **Pre-Check or Validation Failed**\n\n`;
+              message += `One or more checks failed:\n`;
+              if (preCheckScriptsResult === "failure") message += `- ❌ Pre-check scripts failed\n`;
+              if (prettierResult === "failure") message += `- ❌ Prettier validation failed\n`;
+              if (flowAndCodeResult === "failure") message += `- ❌ Flow & code scanning failed\n`;
+              if (codeResult === "failure") message += `- ❌ Changed code scanning failed\n`;
+              if (namingResult === "failure") message += `- ❌ Naming conventions check failed\n`;
+              if (validateResult === "failure") message += `- ❌ Salesforce validation failed\n`;
+              message += `\nPlease review the job logs for detailed error information.`;
+            }
+            
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            message += `\n\n🔗 [View workflow run](${runUrl})`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });

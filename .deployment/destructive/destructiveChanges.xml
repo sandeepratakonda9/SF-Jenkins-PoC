@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <types>
+        <members>Account.EU_InternExperienceFlag__c</members>
+        <members>ApplicationFormProduct.EU_Market__c</members>
+        <members> ApplicationFormSellerItem.EU_Market__c</members>
+        <members> DEP_Package__External_Service__c.DEP_Package__DealerCode1__c</members>
+        <members> DEP_Package__External_Service__c.DEP_Package__Audit_Date__c</members>
+        <members> DEP_Package__External_Service__c.DEP_Package__AuditDate__c</members>
+        <members> DEP_Package__External_Service__c.DEP_Package__AuditScoreValue__c</members>
+        <members> DEP_Package__External_Service__c.DEP_Package__DealerCode__c</members>
+        <members> DEP_Package__External_Service__c.DEP_Package__Next_Audit_Date__c</members>
+        <name>CustomField</name>
+    </types>
+    <types>
+        <members> ApplicationFormProduct.EU_FranceMBFSInternalSharing</members>
+        <members> ApplicationFormProduct.EU_ItalyMBFSInternalSharing</members>
+        <members> ApplicationFormProduct.EU_NetherlandsMBFSInternal_Sharing</members>
+        <members> ApplicationFormProduct.EU_PortugalMBFSInternalSharing</members>
+        <members> ApplicationFormProduct.EU_SpainMBFSInternalSharing</members>
+        <name>SharingCriteriaRule</name>
+    </types>
+    <types>
+        <members>CORE_BypassSwitch__c.CORE_ValidationRuleSwitch__c</members>
+        <members>CORE_CaseContact__c.CORE_Case__c</members>
+        <members>CORE_CaseContact__c.CORE_ContactType__c</members>
+        <members>CORE_CaseContact__c.CORE_Email__c</members>
+        <members>CORE_CaseContact__c.CORE_FirstName__c</members>
+        <members>CORE_CaseContact__c.CORE_IsPrimary__c</members>
+        <members>CORE_CaseContact__c.CORE_LastName__c</members>
+        <members>CORE_CaseContact__c.CORE_PersonAccount__c</members>
+        <members>CORE_CaseContact__c.CORE_Phone__c</members>
+        <members>CORE_CaseContact__c.CORE_PreferredLanguage__c</members>
+        <name>CustomField</name>
+    </types>
+    <types>
+        <members>CORE_BypassSwitch__c</members>
+        <members>CORE_CaseContact__c</members>
+        <name>CustomObject</name>
+    </types>
+    <types>
+        <members>FS_Qualtrics_User</members>
+        <name>PermissionSet</name>
+    </types>
+    <types>
+        <members>GPlus9Lightning</members>
+        <name>CallCenter</name>
+    </types>
+    <types>
+        <members>FS_Application__c.FS_OrchestInProgressCA_FS_Application</members>
+        <members>FS_Application__c.FS_OrchestInProgressMX_FS_Application</members>
+        <members>FS_Application__c.FS_OrchestInProgressUS_FS_Application</members>
+        <name>ListView</name>
+    </types>
+    <types>
+		<members>FS_CreditUSStateRestriction.Rhode_Island_Retail</members>
+		<name>CustomMetadata</name>
+	</types>
+    <version>61.0</version>
+</Package>

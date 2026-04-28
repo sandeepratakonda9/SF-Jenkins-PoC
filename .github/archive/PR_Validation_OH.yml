@@ -1,0 +1,61 @@
+name: 'Pull Requests: Validation against OHqa & Scratch Org' 
+
+on:
+  workflow_call:
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  OH_VALIDATION_STYLE: ${{ vars.OH_VALIDATION_STYLE }}
+
+jobs:
+  validateAgainst:
+    name: OHqa Dry-Run
+    runs-on: [self-hosted, aks-gha-runners]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@${SALESFORCE_CLI_V2_VERSION} --ignore-scripts
+          sf --version
+          if [ $OH_VALIDATION_STYLE == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+      
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+      
+      # Store secret
+      - name: Populate auth file with $OHQA_SFDX_AUTH_URL secret
+        run: echo ${{ secrets.OHQA_SFDX_AUTH_URL}} > ./OHQA_SFDX_AUTH_URL.txt
+      
+      # Authenticate to OHqa
+      - name: Authenticate to OHqa
+        run: .deployment/scripts/authenticationSFDXURL.sh OHqa OHQA_SFDX_AUTH_URL.txt SetDefault
+
+      # Validate against OHqa
+      - name: Validate against OHqa
+        run: |
+          if [ $OH_VALIDATION_STYLE == 'delta' ]; then
+            mkdir ./temp-delta-deployment
+            sf sgd source delta --from "origin/develop" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+            ls -R -l ./temp-delta-deployment
+            RELEVANT_DIR_CHANGED=$(.deployment/scripts/orchastration_mb/checkChangedDirectories.sh)
+            if [ $RELEVANT_DIR_CHANGED == 'TRUE' ]; then
+              .deployment/scripts/validateSourceFormat.sh OHqa RunLocalTests ./temp-delta-deployment sourcepath ${{ github.token }} ${{ github.event.pull_request.number }}
+            else 
+              .deployment/scripts/validateSourceFormat.sh OHqa RunLocalTests ./ sourcepath ${{ github.token }} ${{ github.event.pull_request.number }}
+            fi
+          else
+           .deployment/scripts/validateSourceFormat.sh OHqa RunLocalTests ./ sourcepath ${{ github.token }} ${{ github.event.pull_request.number }}
+          fi

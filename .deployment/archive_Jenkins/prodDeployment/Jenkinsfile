@@ -1,0 +1,76 @@
+@Library('dot-shared-lib@v3.3.2') _
+pipeline {
+
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+    }
+
+    environment {
+        PROJECT_NAME = 'T1224-OneOPS'
+        PROJECT_TEAM = 'myteam'
+        REGISTRY = 'registry.app.corpintra.net'
+        SERVER_KEY_FILE = credentials('SF_SERVER_KEY')
+        CI_USER_PROD = credentials('CI_USER_PROD')
+        CLIENTID_PROD = credentials('CLIENTID_PROD')
+        URL_PROD = credentials('URL_PROD')
+        API_VERSION = credentials('API_VERSION')
+        PACKAGEVERSIONID_COREDM = credentials('PROMOTE_PACKAGE_VERSION_ID_CORE_DM')
+        PACKAGEVERSIONID_COREBL = credentials('PROMOTE_PACKAGE_VERSION_ID_CORE_BL')
+        PACKAGEVERSIONID_COM_BATCH = credentials('PROMOTE_PACKAGE_VERSION_ID_COM_BATCH')
+        PACKAGEVERSIONID_FSDM = credentials('PROMOTE_PACKAGE_VERSION_ID_FS_DM')
+        PACKAGEVERSIONID_FSBL = credentials('PROMOTE_PACKAGE_VERSION_ID_FS_BL')
+        INSTALLATIONKEY = credentials('INSTALLATION_KEY')
+        SFDX_DISABLE_DNS_CHECK = true 
+    }
+
+    agent any
+
+    stages {
+        stage('Set Up Environment') {
+            steps {
+                setEnv(enableStatistics: false)
+            }
+        }
+        stage('Package Version promotion and installation') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_PROD $CI_USER_PROD FS_PROD $SERVER_KEY_FILE $URL_PROD SetAsDefaultDEVHUB"
+                    sh ".deployment/scripts/packagePromote.sh FS_PROD $PACKAGEVERSIONID_COREDM"
+                    sh ".deployment/scripts/packagePromote.sh FS_PROD $PACKAGEVERSIONID_COM_BATCH"
+                    sh ".deployment/scripts/packagePromote.sh FS_PROD $PACKAGEVERSIONID_FSDM"
+                    sh ".deployment/scripts/packagePromote.sh FS_PROD $PACKAGEVERSIONID_FSBL"
+                    sh ".deployment/scripts/packageInstall.sh FS_PROD $PACKAGEVERSIONID_COREDM $INSTALLATIONKEY"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_core.sh FS_PROD RunLocalTests"
+                    sh ".deployment/scripts/packageInstall.sh FS_PROD $PACKAGEVERSIONID_COM_BATCH $INSTALLATIONKEY"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_com.sh FS_PROD RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/pre-deployment_fs.sh FS_PROD RunLocalTests"
+                    sh ".deployment/scripts/packageInstall.sh FS_PROD $PACKAGEVERSIONID_FSDM $INSTALLATIONKEY"
+                    sh ".deployment/scripts/packageInstall.sh FS_PROD $PACKAGEVERSIONID_FSBL $INSTALLATIONKEY"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_fs.sh FS_PROD RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_PROD.sh FS_PROD RunLocalTests"
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+            dir("${env.WORKSPACE}@tmp") {
+                deleteDir()
+            }
+        }
+    }
+
+}

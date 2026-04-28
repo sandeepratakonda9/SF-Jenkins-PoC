@@ -1,0 +1,95 @@
+name: 'CD: devTEMPLATE deployment after successful STAGE deployment' 
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  ORG_ALIAS: "MBM_devTEMPLAT_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  DEPLOYMENT_STYLE: ${{ vars.DEVTEMP_DEPLOYMENT_STYLE }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+  TESTRUN_ON_DEPLOYMENT: ${{ vars.DEVTEMP_TESTRUN_ON_DEPLOYMENT }}
+  DEPLOY_DESTRUCTIVE_CHANGES: ${{ vars.DEVTEMP_DELTA_DEPLOY_DESTRUCTIVE_CHANGES }}
+  TARGET_ORG_TYPE: "DEVOPSSANDBOX"
+  DEPLOY_OO_FOLDERS: "TRUE"
+  DEPLOY_OH_FOLDERS: "TRUE"
+  DEPLOY_CMP_FOLDERS: "TRUE"
+
+jobs:
+  deployToDevTemplate:
+    name: "Deploy to devTEMPLATE"
+    runs-on: [self-hosted, aks-gha-runners]
+    environment: devTEMPLATE
+
+    steps:
+      - name: Prepare for DevTemplate Deployment
+        run: echo "Running DevTemplate Deployment..."
+
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          if [ $DEPLOYMENT_STYLE == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Handle irrelevant metadata against devTemplate org
+      - name: Handle irrelevant metadata
+        run: .deployment/scripts/orchastration_mb/pre-irrelevantMetadata_STAGE.sh deployment
+      
+      # Store secret for devTemplate
+      - name: Populate auth file with DEVTEMP_SFDX_URL secret
+        run: echo ${{ secrets.DEVTEMP_SFDX_URL}} > ./DEVTEMP_SFDX_URL.txt
+      
+      # Authenticate to devTemplate
+      - name: Authenticate to devTemplate
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS DEVTEMP_SFDX_URL.txt SetDefault
+
+      # Deploy to devTemplate
+      - name: Deploy to devTemplate
+        run: |
+          if [ $DEPLOYMENT_STYLE == 'delta' ]; then
+            mkdir ./temp-delta-deployment
+            sf sgd source delta --from "HEAD~1" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+            ls -R -l ./temp-delta-deployment
+            RELEVANT_DIR_CHANGED=$(.deployment/scripts/orchastration_mb/checkChangedDirectories.sh)
+            if [ $RELEVANT_DIR_CHANGED == 'TRUE' ]; then
+              .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment $DEPLOY_DESTRUCTIVE_CHANGES
+            else 
+              .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            fi
+          else
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+          fi 
+
+      # Send Teams notification in case of failure
+      - name: Post Deployment Status to Teams
+        if: ${{ always() }}
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            curl -X POST -H "Content-Type: application/json" -d '{
+            "text": "devTemplate: Salesforce deployment to devTemplate org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
+            "themeColor": "0ed700"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          else
+            curl -X POST -H "Content-Type: application/json" -d '{
+              "text": "devTemplate: Salesforce deployment to devTemplate org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
+              "themeColor": "FF0000"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          fi

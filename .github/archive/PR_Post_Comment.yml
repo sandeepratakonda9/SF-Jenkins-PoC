@@ -1,0 +1,48 @@
+name: Post PR Comment
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'Pull Request number'
+        required: true
+        type: number
+      message:
+        description: 'Message to post to the PR'
+        required: true
+        type: string
+      include_workflow_link:
+        description: 'Include link to workflow run'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  postComment:
+    name: Post Comment to PR
+    runs-on: [self-hosted, aks-gha-runners]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Post comment to PR
+        uses: actions/github-script@v6
+        with:
+          script: |
+            let message = `${{ inputs.message }}`;
+            const includeLink = ${{ inputs.include_workflow_link }};
+            
+            // Add workflow link if requested
+            if (includeLink) {
+              const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+              message += `\n\n🔗 [View workflow run](${runUrl})`;
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: ${{ inputs.pr_number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+

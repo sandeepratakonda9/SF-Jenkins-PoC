@@ -1,0 +1,60 @@
+name: 'CI: Packages - new version creation testing'
+
+on:
+  workflow_dispatch:
+
+env:
+  INSTALLATIONKEY: ${{ secrets.INSTALLATIONKEY }}
+  VERSIONNAME: "CI Package version"
+  VERSIONDESCRIPTION: "CI: Package version creation testing"
+  SFDX_DISABLE_DNS_CHECK: true 
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+
+jobs:
+  CI_packageVersioncreation:
+    runs-on: [self-hosted, aks-gha-runners]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@${SALESFORCE_CLI_V2_VERSION} --ignore-scripts
+          sf --version
+
+      # Store secret for DevHub
+      - name: Populate auth file with DevHub_SFDX_URL secret
+        run: echo ${{ secrets.DEVHUB_SFDX_URL}} > ./DEVHUB_SFDX_URL.txt
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Authenticate to DevHub
+      - name: Authenticate to DevHub
+        run: .deployment/scripts/authenticationSFDXURL.sh FS_DevHub DEVHUB_SFDX_URL.txt SetAsDefaultDEVHUB
+
+      # run CI job: create all MB package versions WITHOUT codeCoverage
+      - name: create all MB package versions
+        run: .deployment/scripts/orchastration_mb/packageCreationMB_all.sh FS_DevHub "${INSTALLATIONKEY}" ${VERSIONNAME} ${VERSIONDESCRIPTION} "calculateCodeCoverage"
+
+      # Send Teams notification in case of failure
+      - name: Post Deployment Status to Teams
+        if: ${{ always() }}
+        run: |
+          if [ ${{ job.status }} == 'failure' ]; then
+            curl -X POST -H "Content-Type: application/json" -d '{
+              "text": "CI-Packaging: Package version creation check has completed: WORKFLOW FAILED. Job Status: ${{ job.status }}",
+              "themeColor": "FF0000"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          fi
+
+
+        

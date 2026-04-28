@@ -1,0 +1,170 @@
+@Library('dot-shared-lib@master') _
+pipeline {
+
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+    }
+
+    environment {
+        PROJECT_NAME = 'T1224-OneOPS'
+        PROJECT_TEAM = 'myteam'
+        REGISTRY = 'registry.app.corpintra.net'
+        SONAR_CREDENTIALS = 'pid5309-sonar-token'
+        SONAR_HOST = 'https://dfscto-sonar.dot.i.mercedes-benz.com'
+        SERVER_KEY_FILE = credentials('SF_SERVER_KEY')
+        CI_USER_SIT = credentials('CI_USER_SIT_SB')
+        CLIENTID_SIT = credentials('CLIENTID_SIT_SB')
+        URL_SIT = credentials('URL_SIT')
+        CI_USER_HOTFIX = credentials('CI_USER_HOTFIX')
+        CLIENTID_HOTFIX = credentials('CLIENTID_HOTFIX')
+        URL_HOTFIX = credentials('URL_HOTFIX')
+        CI_USER_PROD = credentials('CI_USER_PROD')
+        CLIENTID_PROD = credentials('CLIENTID_PROD')
+        URL_PROD = credentials('URL_PROD')
+        API_VERSION = credentials('API_VERSION')
+        VERSIONNAME='MBM-HOTFIX'
+        VERSIONDESCRIPTION='Urgent Hotfix version'
+        INSTALLATIONKEY = credentials('INSTALLATION_KEY')
+        SFDX_DISABLE_DNS_CHECK = true 
+        SF_DISABLE_AUTOUPDATE = true
+    }
+
+    agent any
+
+    stages {
+        stage('Set Up Environment') {
+            steps {
+                setEnv(enableStatistics: false)
+            }
+        }
+        stage ('PR review: SIT validation') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            when { 
+                beforeAgent true
+                changeRequest target: 'develop' 
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_SIT $CI_USER_SIT FS_SIT $SERVER_KEY_FILE $URL_SIT"
+                    sh ".deployment/scripts/deployMetadataFormat.sh FS_SIT RunLocalTests CheckOnly"
+                    sh ".deployment/scripts/scanner.sh"
+            }
+        }
+        stage('PR review: Scratch Org validation') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            when { 
+                beforeAgent true
+                changeRequest target: 'develop' 
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_PROD $CI_USER_PROD FS_PROD $SERVER_KEY_FILE $URL_PROD SetAsDefaultDEVHUB"
+                    sh ".deployment/scripts/scratchOrgCreate.sh FS_SO_PR_VAL FS_PROD true"
+                    sh ".deployment/scripts/orchastration_mb/deploy-dir-structure.sh FS_SO_PR_VAL RunLocalTests"
+                    sh ".deployment/scripts/apexTestRun.sh FS_SO_PR_VAL RunSpecifiedTests"
+                    sh ".deployment/scripts/scratchOrgDelete.sh FS_SO_PR_VAL"
+            }
+        }
+        stage ('PR merge: SIT Deployment') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            when { 
+                beforeAgent true
+                branch 'develop'
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_SIT $CI_USER_SIT FS_SIT $SERVER_KEY_FILE $URL_SIT"
+                    sh ".deployment/scripts/orchastration_mb/deploy-dir-structure.sh FS_SIT RunLocalTests"
+            }
+        }
+        stage ('Hotfix workflow: package creation & installation') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            when { 
+                beforeAgent true
+                changeRequest target: 'main' 
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_PROD $CI_USER_PROD FS_PROD $SERVER_KEY_FILE $URL_PROD SetAsDefaultDEVHUB"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_HOTFIX $CI_USER_HOTFIX FS_HOTFIX $SERVER_KEY_FILE $URL_HOTFIX"
+                    sh ".deployment/scripts/orchastration_mb/packageCreationInstallationIncremental.sh origin/main HEAD FS_PROD FS_HOTFIX $VERSIONNAME $VERSIONDESCRIPTION $INSTALLATIONKEY"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_core.sh FS_HOTFIX RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_com.sh FS_HOTFIX RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_fs.sh FS_HOTFIX RunLocalTests"
+            }
+        }
+        stage ('Hotfix workflow: PR validation against SIT') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            when { 
+                beforeAgent true
+                changeRequest target: 'main' 
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_SIT $CI_USER_SIT FS_SIT $SERVER_KEY_FILE $URL_SIT"
+                    sh ".deployment/scripts/deployMetadataFormat.sh FS_SIT RunLocalTests CheckOnly"
+                    sh ".deployment/scripts/scanner.sh"
+            }
+        }
+        stage('Scan with SonarQube') {
+             steps {
+                script {
+                   sonar.scan()
+                }
+             }
+        } 
+    }
+    
+    post {
+        always {
+            cleanWs()
+            dir("${env.WORKSPACE}@tmp") {
+                deleteDir()
+            }
+        }
+    }
+
+}

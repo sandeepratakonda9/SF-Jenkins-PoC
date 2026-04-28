@@ -1,0 +1,68 @@
+name: 'Pull Requests: Deploy to OHqa on PR merge' 
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - OHqa
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  OH_DEPLOYMENT_STYLE: ${{ vars.OH_DEPLOYMENT_STYLE }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.[format('{0}_TEAMS_NOTIFICATIONS_WEBHOOK', BRANCH_NAME)] }}
+  TESTRUN_ON_OHQA_DEPLOYMENT: ${{ vars.TESTRUN_ON_OHQA_DEPLOYMENT }}
+  PROJECT_FOLDER: "fs_ohCop"
+
+jobs:
+  deploy-to-OHqa-org:
+    name: Deploy to OHqa
+    runs-on: [self-hosted, aks-gha-runners]
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@${SALESFORCE_CLI_V2_VERSION} --ignore-scripts
+          sf --version
+          if [ $OH_DEPLOYMENT_STYLE == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Store secret
+      - name: Populate auth file with $OHQA_SFDX_AUTH_URL secret
+        run: echo ${{ secrets.OHQA_SFDX_AUTH_URL}} > ./OHQA_SFDX_AUTH_URL.txt
+      
+      # Authenticate to OHqa
+      - name: Authenticate to OHqa
+        run: .deployment/scripts/authenticationSFDXURL.sh OHqa OHQA_SFDX_AUTH_URL.txt SetDefault
+  
+      # Deploy to OHqa
+      - name: Deploy to OHqa
+        run: |
+          if [ $OH_DEPLOYMENT_STYLE == 'delta' ]; then
+            mkdir ./temp-delta-deployment
+            sf sgd source delta --from "HEAD~1" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+            ls -R -l ./temp-delta-deployment
+            RELEVANT_DIR_CHANGED=$(.deployment/scripts/orchastration_mb/checkChangedDirectories.sh)
+            if [ $RELEVANT_DIR_CHANGED == 'TRUE' ]; then
+              .deployment/scripts/deploySourceFormat.sh OHqa $TESTRUN_ON_OHQA_DEPLOYMENT sourcepath ./temp-delta-deployment ./temp-delta-deployment/destructiveChanges/destructiveChanges.xml
+            else 
+              .deployment/scripts/orchastration_mb/deploy-dir-structure.sh OHqa $TESTRUN_ON_OHQA_DEPLOYMENT TRUE DEVOPSSANDBOX
+            fi
+          else
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh OHqa $TESTRUN_ON_OHQA_DEPLOYMENT TRUE DEVOPSSANDBOX
+          fi 
+        #  .deployment/scripts/deploySourceFormat.sh OHqa $TESTRUN_ON_OHQA_DEPLOYMENT sourcepath fs_post_org-dependent/SIT

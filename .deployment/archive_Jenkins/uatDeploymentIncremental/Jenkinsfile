@@ -1,0 +1,79 @@
+@Library('dot-shared-lib@v3.3.2') _
+pipeline {
+
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+    }
+
+    environment {
+        PROJECT_NAME = 'T1224-OneOPS'
+        PROJECT_TEAM = 'myteam'
+        REGISTRY = 'registry.app.corpintra.net'
+        SERVER_KEY_FILE = credentials('SF_SERVER_KEY')
+        CI_USER_UAT = credentials('CI_USER_UAT')
+        CLIENTID_UAT = credentials('CLIENTID_UAT')
+        URL_UAT = credentials('URL_UAT')
+        CI_USER_PROD = credentials('CI_USER_PROD')
+        CLIENTID_PROD = credentials('CLIENTID_PROD')
+        URL_PROD = credentials('URL_PROD')
+        API_VERSION = credentials('API_VERSION')
+        VERSIONNAME = credentials('VERSION_NAME')
+        VERSIONDESCRIPTION = credentials('VERSION_DESCRIPTION')
+        TAGNUMBER = credentials('TAG_NUMBER')
+        LATESTPACKAGEVERSION = credentials('USE_LATEST_PACKAGEVERSION')
+        INCREMENTAL_PACKAGING = credentials('USE_INCREMENTAL_PACKAGING')
+        FROM_BRANCH = credentials('FROM_BRANCH')
+        TO_BRANCH = credentials('TO_BRANCH')
+        PACKAGEVERSIONID_COREDM = credentials('CURRENT_PACKAGE_VERSION_ID_CORE_DM')
+        PACKAGEVERSIONID_COREBL = credentials('CURRENT_PACKAGE_VERSION_ID_CORE_BL')
+        PACKAGEVERSIONID_FSDM = credentials('CURRENT_PACKAGE_VERSION_ID_FS_DM')
+        PACKAGEVERSIONID_FSBL = credentials('CURRENT_PACKAGE_VERSION_ID_FS_BL')
+        INSTALLATIONKEY = credentials('INSTALLATION_KEY')
+        SFDX_DISABLE_DNS_CHECK = true 
+    }
+
+    agent any
+
+    stages {
+        stage('Set Up Environment') {
+            steps {
+                setEnv(enableStatistics: false)
+            }
+        }
+        stage('Package Version installation') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.198.7'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_PROD $CI_USER_PROD FS_PROD $SERVER_KEY_FILE $URL_PROD SetAsDefaultDEVHUB"
+                    sh ".deployment/scripts/authentication.sh $CLIENTID_UAT $CI_USER_UAT FS_UAT $SERVER_KEY_FILE $URL_UAT"
+                    sh ".deployment/scripts/orchastration_mb/pre-deployment_fs.sh FS_UAT RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/packagingIncremental.sh $FROM_BRANCH $TO_BRANCH FS_PROD FS_UAT $INSTALLATIONKEY"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_core.sh FS_UAT RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_com.sh FS_UAT RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_fs.sh FS_UAT RunLocalTests"
+                    sh ".deployment/scripts/orchastration_mb/post-deployment_STAGE.sh FS_UAT RunLocalTests"
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+            dir("${env.WORKSPACE}@tmp") {
+                deleteDir()
+            }
+        }
+    }
+
+}

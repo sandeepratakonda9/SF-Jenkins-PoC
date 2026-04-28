@@ -1,0 +1,51 @@
+name: Scheduled Validation Full to OHqa
+
+# Trigger the workflow with a manual button in GitHub UI
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 * * *' # Every Night
+
+jobs:
+  validate:
+    runs-on: [self-hosted, aks-gha-runners]
+    
+    steps:
+    # Checkout the OHqa branch
+    - name: Checkout code from OHqa branch
+      uses: actions/checkout@v3
+      with:
+        ref: OHqa
+
+    # Install Salesforce CLI
+    - name: 'Install Salesforce CLI'
+      run: |
+        sudo npm install --global @salesforce/cli@${SALESFORCE_CLI_V2_VERSION} --ignore-scripts
+
+    - id: setup-node
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18.x'
+          
+      # Install Salesforce CLI
+    - name: 'Install Salesforce CLI'
+      run: |
+        sudo npm install --global @salesforce/cli@${SALESFORCE_CLI_V2_VERSION} --ignore-scripts
+        sf --version
+          
+    # Make scripts executable
+    - name: Make scripts executable
+      run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+      
+    # Store secret
+    - name: Populate auth file with $OHQA_SFDX_AUTH_URL secret
+      run: echo ${{ secrets.OHQA_SFDX_AUTH_URL}} > ./OHQA_SFDX_AUTH_URL.txt
+      
+     # Authenticate to OHqa
+    - name: Authenticate to OHqa
+      run: .deployment/scripts/authenticationSFDXURL.sh OHqa OHQA_SFDX_AUTH_URL.txt SetDefault
+
+    # Validate specific folders against the Sandbox in a single command
+    - name: Validate /fs_ohCop and /fs_industryCloud/ohCop against Sandbox
+      run: |
+        sf project deploy start --source-dir fs_ohCop --source-dir fs_industryCloud/ohCop --target-org OHqa --test-level NoTestRun --ignore-conflicts

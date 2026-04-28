@@ -1,0 +1,329 @@
+name: 'Pull Requests: SIT & Scratch Org validation' 
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'Pull request number'
+        required: true
+        type: number
+
+# Concurrency control: Cancel in-progress runs when new commits are pushed to the same PR
+# This prevents resource waste and ensures only the latest code is validated
+concurrency:
+  group: pr-validation-${{ inputs.pr_number }}
+  cancel-in-progress: true
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  ORG_ALIAS: "MBM_SIT_CI"
+  ORG_ALIAS_SCRATCH: MBM_SO_PR_${{ github.event.pull_request.number }}
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  SIT_VALIDATION_STYLE: ${{ vars.SIT_VALIDATION_STYLE }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+  SO_SNAPSHOT_USAGE: ${{ vars.SO_SNAPSHOT_USAGE }}
+  DEPLOY_OO_FOLDERS: "TRUE"
+  DEPLOY_OH_FOLDERS: ${{ vars.PR_VALI_SO_DEPLOY_OH_FOLDERS }}
+  DEPLOY_CMP_FOLDERS: ${{ vars.PR_VALI_SO_DEPLOY_CMP_FOLDERS }}
+  KEEP_SCRATCH_ORG_OPEN: ${{ vars.PR_VALI_SO_USE_AS_REVIEW_ORG }} # Set to true if you want to keep the scratch org open after a successful deployment during PR validation
+
+jobs:
+  validateAgainstSIT:
+    name: SIT dry-run
+    runs-on: [self-hosted, aks-gha-runners]
+    # Job-level concurrency: Only one SIT validation per PR at a time
+    concurrency:
+      group: sit-validation-${{ inputs.pr_number }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Fetch changed files in PR using GitHub API
+      - name: Fetch changed files in PR
+        id: fetch-changes
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            });
+            const changedFiles = files.map(file => file.filename).join("\n");
+            console.log("Changed files:\n" + changedFiles);
+            core.setOutput("files", changedFiles);
+
+      # Set SIT_TEST_RUN dynamically based on file changes and team
+      - name: Set SIT_TEST_RUN based on file changes and team
+        id: set-test-run
+        run: |
+          CHANGES=$(echo -e "${{ steps.fetch-changes.outputs.files }}" | grep -E '\.(cls|trigger|md-meta\.xml|flow-meta\.xml|validationRule-meta\.xml|customPermission-meta\.xml|permissionset-meta\.xml|permissionsetgroup-meta\.xml|sharingRules-meta\.xml)$' || true)
+          
+          if [ -n "$CHANGES" ]; then
+            echo "Relevant changes detected:"
+            echo "$CHANGES"
+            
+            # Use team-based test selection
+            chmod +x .deployment/scripts/selectTestsByTeam.sh
+            .deployment/scripts/selectTestsByTeam.sh "${{ steps.fetch-changes.outputs.files }}" "${{ github.head_ref }}"
+          else
+            echo "No relevant changes detected."
+            echo "SIT_TEST_RUN=NoTestRun" >> $GITHUB_ENV
+          fi
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          if [ $SIT_VALIDATION_STYLE == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Handle irrelevant metadata against SIT org
+      - name: Handle irrelevant metadata
+        run: .deployment/scripts/orchastration_mb/pre-irrelevantMetadata_SIT.sh validation
+
+      # Store secret for SIT
+      - name: Populate auth file with SIT_SFDX_URL secret
+        run: echo ${{ secrets.SIT_SFDX_URL}} > ./SIT_SFDX_URL.txt
+
+      # Authenticate to SIT
+      - name: Authenticate to SIT
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS SIT_SFDX_URL.txt SetDefault
+
+      # Validate against SIT
+      - name: Validate against SIT
+        run: |
+          if [ $SIT_VALIDATION_STYLE == 'delta' ]; then
+            mkdir ./temp-delta-deployment
+            sf sgd source delta --from "origin/develop" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+            ls -R -l ./temp-delta-deployment
+            RELEVANT_DIR_CHANGED=$(.deployment/scripts/orchastration_mb/checkChangedDirectories.sh)
+            if [ $RELEVANT_DIR_CHANGED == 'TRUE' ]; then
+              .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $SIT_TEST_RUN sourcepath ./temp-delta-deployment ${{ github.token }} ${{ github.event.pull_request.number }}
+            else 
+              .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $SIT_TEST_RUN sourcepath ./ ${{ github.token }} ${{ github.event.pull_request.number }}
+            fi
+          else
+            .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $SIT_TEST_RUN sourcepath ./ ${{ github.token }} ${{ github.event.pull_request.number }}
+          fi
+
+      # Cancel deployment if workflow was cancelled
+      - name: Cancel deployment on interruption
+        if: cancelled() && hashFiles('.deployment_id_sit.txt') != ''
+        run: |
+          DEPLOYMENT_ID=$(cat .deployment_id_sit.txt)
+          echo "Workflow cancelled - cancelling deployment: $DEPLOYMENT_ID"
+          chmod +x .deployment/scripts/cancelRunningDeployments.sh
+          .deployment/scripts/cancelRunningDeployments.sh $ORG_ALIAS "$DEPLOYMENT_ID"
+
+  validateAgainstScratchOrg:
+    name: Scratch Org dry-run
+    runs-on: [self-hosted, aks-gha-runners]
+    # Job-level concurrency: Only one Scratch Org validation per PR at a time
+    concurrency:
+      group: scratch-org-validation-${{ inputs.pr_number }}
+      cancel-in-progress: true
+    outputs:
+      skip_validation: ${{ steps.assess-validation.outputs.skip_validation }}
+      skip_reason: ${{ steps.assess-validation.outputs.skip_reason }}
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI (needed for delta generation and assessment)
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          echo 'y' | sfdx plugins:install sfdx-git-delta
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/scratchOrgs/*.sh && chmod +x .deployment/scripts/orgManagement/*.sh
+
+      # Generate delta to analyze changes (needed for both assessment and deployment)
+      - name: Generate delta for change assessment
+        run: |
+          echo "Generating delta to analyze PR changes..."
+          mkdir -p ./temp-delta-deployment
+          sf sgd source delta --from "origin/develop" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+          echo ""
+          echo "Delta generated. Contents:"
+          ls -la ./temp-delta-deployment/
+
+      # Assess if scratch org validation should run (checks deletions, settings, multiple folders)
+      - name: Assess if scratch org validation is required
+        run: |
+          chmod +x .deployment/scripts/scratchOrgs/assessScratchOrgValidationNeed.sh
+          .deployment/scripts/scratchOrgs/assessScratchOrgValidationNeed.sh ./temp-delta-deployment
+
+      # Capture the assessment results as job outputs (must be separate step to read GITHUB_ENV)
+      - name: Capture assessment results
+        id: assess-validation
+        run: |
+          echo "skip_validation=$SKIP_SCRATCH_ORG" >> $GITHUB_OUTPUT
+          echo "skip_reason=$SKIP_REASON" >> $GITHUB_OUTPUT
+          
+          echo "Captured outputs for comment job:"
+          echo "  skip_validation=$SKIP_SCRATCH_ORG"
+          echo "  skip_reason=$SKIP_REASON"
+
+      # Post validation decision to PR immediately after assessment
+      - name: Post validation decision to PR
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            
+            // Get validation decision from assessment
+            const skipValidation = "${{ env.SKIP_SCRATCH_ORG }}";
+            const skipReason = "${{ env.SKIP_REASON }}";
+            
+            // Make script executable and run it
+            execSync('chmod +x .deployment/scripts/scratchOrgs/generateValidationCommentMessage.sh');
+            const message = execSync(
+              `.deployment/scripts/scratchOrgs/generateValidationCommentMessage.sh "${skipValidation}" "${skipReason}"`,
+              { encoding: 'utf-8' }
+            );
+            
+            // Add workflow link
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const fullMessage = message + `\n\n🔗 [View workflow run](${runUrl})`;
+            
+            // Post comment to PR (no await, matching PR_PreCheck.yml pattern)
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: fullMessage
+            });
+
+      # Store secret for DevHub
+      - name: Populate auth file with DevHub_SFDX_URL secret
+        if: env.SKIP_SCRATCH_ORG != 'true'
+        run: echo ${{ secrets.DEVHUB_SFDX_URL}} > ./DEVHUB_SFDX_URL.txt
+
+      # Authenticate to DevHub
+      - name: Authenticate to DevHub
+        if: env.SKIP_SCRATCH_ORG != 'true'
+        run: .deployment/scripts/authenticationSFDXURL.sh MBM_DevHub DEVHUB_SFDX_URL.txt SetAsDefaultDEVHUB
+
+      # Determine which scratch org snapshot to use
+      - name: Determine scratch org snapshot type
+        if: env.SKIP_SCRATCH_ORG != 'true'
+        run: |
+          if [ $SO_SNAPSHOT_USAGE == 'USE_ONLY_PLAIN' ]; then
+            echo "Scratch Org Snapshot: only plain Snapshot will be used to ensure stability."
+            echo "STATIC_DIR_CHANGED=TRUE" >> $GITHUB_ENV
+          else
+            echo "STATIC_DIR_CHANGED=$(.deployment/scripts/scratchOrgs/scratchOrgCheckChangedDirectories.sh)" >> $GITHUB_ENV
+            echo "STATIC_DIR_CHANGED is set to $STATIC_DIR_CHANGED"
+          fi
+
+      # Check if the branch is from OH COP and if yes, set the variable to true so that is deploys all folders
+      - name: Check branch name for OneHouse COP
+        if: env.SKIP_SCRATCH_ORG != 'true'
+        run: |
+          branch_name=${{ github.head_ref }}
+          echo "Checking if PR is from OneHouse ..."      
+          if [[ $branch_name == oh/COP* || $branch_name == oh/CHA* ]]; then
+            echo "Check done: PR is from OneHouse - Scratch orgs will deploy also OH-COP folder ..."
+            echo "DEPLOY_OH_FOLDERS=TRUE" >> $GITHUB_ENV
+          else
+            echo "Check done: PR is from OneOps - skipping OH-COP folder"
+          fi
+
+      # Create Scratch Org
+      - name: Create Scratch Org
+        if: env.SKIP_SCRATCH_ORG != 'true'
+        id: scratchOrgCreation
+        run: | 
+          echo "STATIC_DIR_CHANGED is set to ${{ env.STATIC_DIR_CHANGED }}"
+          if [ ${{ env.STATIC_DIR_CHANGED }} == 'TRUE' ]; then
+            echo "--- Starting Scratch Org creation with just managed packages installed ... ---"
+            sf org create scratch --definition-file config/scratch-snapshot-plain.json --alias $ORG_ALIAS_SCRATCH --target-dev-hub MBM_DevHub --duration-days 1 --wait 30 --set-default --no-track-source
+            sf org list
+            echo "--- Scratch Org creation completed ! ---"
+          else 
+            echo "--- Starting Scratch Org creation with packages installed as well as static metadata deployed ... ---"
+            sf org create scratch --definition-file config/scratch-snapshot-full.json --alias  $ORG_ALIAS_SCRATCH --target-dev-hub MBM_DevHub --duration-days 1 --wait 30 --set-default --no-track-source
+            sf org list
+            echo "--- Scratch Org creation completed ! ---"
+          fi
+
+      # Handle undeployable metadata against scratch orgs
+      - name: Handling of undeployable metadata
+        if: env.SKIP_SCRATCH_ORG != 'true'
+        run: | 
+          echo "--- Starting Scratch Org metadata prep for OmniStudio supported org ... ---"
+          .deployment/scripts/orchastration_mb/pre-undeployableMetadata_scratchOrgs.sh SO_SUPPORTS_OMNI $DEPLOY_OH_FOLDERS
+          echo "--- Scratch Org metadata prep completed ! ---"
+
+      # Deploy directories to Scratch Org
+      - name: Deploy directories to Scratch Org
+        if: env.SKIP_SCRATCH_ORG != 'true'
+        id: deployToScratchOrg
+        run: | 
+          echo "STATIC_DIR_CHANGED is set to ${{ env.STATIC_DIR_CHANGED }}"
+          if [ ${{ env.STATIC_DIR_CHANGED }} == 'TRUE' ]; then
+            echo "--- Starting deployment of whole repository ... ---"
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH SCRATCHORGPLAIN $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            echo "--- Scratch Org deployment completed ! ---"
+          else 
+            echo "--- Starting deployment of current metadata changes ... ---"
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS_SCRATCH SCRATCHORGFULL $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+            echo "--- Scratch Org deployment completed ! ---"
+          fi
+
+      # Run Apex tests on Scratch Org - Skipped due to issues and too long run times // 29.05.2024
+      # - name: Run Apex tests on Scratch Org
+      #   run: .deployment/scripts/apexTestRun.sh $ORG_ALIAS_SCRATCH RunSpecifiedTests
+
+      - name: Post Scratch Org Login URL to PR
+        if: steps.deployToScratchOrg.outcome == 'success' && env.KEEP_SCRATCH_ORG_OPEN == 'true'
+        run: .deployment/scripts/scratchOrgs/scratchOrgPostLoginURLToPR.sh $ORG_ALIAS_SCRATCH ${{ github.token }} ${{ github.event.pull_request.number }}
+
+      # Housekeeping
+      - name: Delete Scratch org
+        if: always() && steps.scratchOrgCreation.outcome == 'success' && (steps.deployToScratchOrg.outcome == 'failure' || env.KEEP_SCRATCH_ORG_OPEN != 'true')
+        run: .deployment/scripts/scratchOrgDelete.sh $ORG_ALIAS_SCRATCH
+
+  #postToTeams: - not in use anymore due to change how teams handles webhooks - reactivate if you see use in it in the future // Adrian SF
+  #  name: "Post outcome to Teams"
+  #  needs: [validateAgainstSIT, validateAgainstScratchOrg]
+  #  runs-on: [self-hosted, aks-gha-runners]
+
+  #  steps:
+  #    - uses: actions/checkout@v3
+    # Send Teams notification
+  #    - name: Post Deployment Status to Teams
+  #      if: ${{ always() }}
+  #      run: |
+  #        if [ ${{ job.status }} == 'success' ]; then
+  #          curl -X POST -H "Content-Type: application/json" -d '{
+  #          "text": "PR Validation: SIT & Scratch org dry-runs for https://git.i.mercedes-benz.com/mbfs-OneOps/T1224-OneOPS/pull/${{github.ref_name}} by @${{ github.actor }} are completed: VALIDATION SUCCESSFUL. Job Status: ${{ job.status }}",
+  #          "themeColor": "0ed700"
+  #          }' $TEAMS_NOTIFICATIONS_WEBHOOK
+  #        fi

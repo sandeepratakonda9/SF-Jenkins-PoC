@@ -1,0 +1,98 @@
+name: 'CD: PROD - Deployment in Source Format' 
+
+on:
+  workflow_dispatch:
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  ORG_ALIAS: "MBM_PROD_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  RELEASE_VERSION: ${{ vars.RELEASE_VERSION }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+  DEPLOYMENT_STYLE: ${{ vars.PROD_DEPLOYMENT_STYLE }}
+  TARGET_ORG_TYPE: ${{ vars.PROD_TARGET_ORG_TYPE }}
+  DEPLOY_OO_FOLDERS: ${{ vars.PROD_DEPLOY_OO_FOLDERS }}
+  DEPLOY_OH_FOLDERS: ${{ vars.PROD_DEPLOY_OH_FOLDERS }}
+  DEPLOY_CMP_FOLDERS: ${{ vars.PROD_DEPLOY_CMP_FOLDERS }}
+  TESTRUN_ON_DEPLOYMENT: ${{ vars.PROD_TESTRUN_ON_DEPLOYMENT }}
+
+jobs:
+  deployToProduction:
+    name: "Deploy to Production"
+    runs-on: [self-hosted, aks-gha-runners]
+    environment: PROD
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          if [ $DEPLOYMENT_STYLE == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+
+      # Store secret for DevHub / PROD
+      - name: Populate auth file with DevHub_SFDX_URL secret
+        run: echo ${{ secrets.DEVHUB_SFDX_URL}} > ./PROD_SFDX_URL.txt
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Authenticate to DevHub / PROD
+      - name: Authenticate to DevHub / PROD
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS PROD_SFDX_URL.txt SetAsDefaultDEVHUB
+
+      # Run Deployment to PROD
+      - name: Deployment to PROD
+        id: PROD_deployment
+        run: |
+          if [ $DEPLOYMENT_STYLE == 'delta' ]; then
+            mkdir ./temp-delta-deployment
+            sf sgd source delta --from $(git describe --abbrev=0) --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+            ls -R -l ./temp-delta-deployment
+            .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment
+          else
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+          fi
+
+      # Org-specific folder deployment to PROD
+      - name: Deploy org-specific folder to PROD
+        id: PROD_post_deployment
+        run: |
+          .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./fs_post_org-dependent/PROD
+      
+      # Tab branch on deployment success
+      - name: Tag main branch with Release
+        if: steps.PROD_deployment.outcome == 'success' && steps.PROD_post_deployment.outcome == 'success'
+        run: |
+          sudo apt-get install jq
+          git config --global user.email "ci.user@mercedes-benz.com"
+          git config --global user.name "CI User"
+          .deployment/scripts/tag.sh ProductionRelease $RELEASE_VERSION
+        
+      # Send Teams notification
+      - name: Post Deployment Status to Teams
+        if: ${{ always() }}
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            curl -X POST -H "Content-Type: application/json" -d '{
+            "text": "PROD: Salesforce deployment to Production org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
+            "themeColor": "0ed700"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          else
+            curl -X POST -H "Content-Type: application/json" -d '{
+              "text": "PROD: Salesforce deployment to Production org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
+              "themeColor": "FF0000"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          fi

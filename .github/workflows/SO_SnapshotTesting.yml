@@ -1,0 +1,59 @@
+name: 'SCRATCH ORG: Test Scratch Org Snapshot' 
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  ORG_ALIAS: "MBM_PROD_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  SO_SNAPSHOT_SCOPE: "testing" # values accepted are "plain" or anything else (ideally "full"). With "plain" the snapshot is only having managed packages installed.
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+
+jobs:
+  recreateScratchOrgSnapshot:
+    runs-on: [self-hosted, aks-gha-runners]
+    name: "Create Scratch Org Snapshot"
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts 
+          sf --version
+
+      # Install Puppeteer and dependencies
+      - name: Install puppeteer
+        run: npm install puppeteer
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/scratchOrgs/*.sh && chmod +x .deployment/scripts/orgManagement/*.sh
+      
+      # Store secret for DevHub
+      - name: Populate auth file with DevHub_SFDX_URL secret
+        run: echo ${{ secrets.DEVHUB_SFDX_URL}} > ./DEVHUB_SFDX_URL.txt
+
+      # Authenticate to DevHub
+      - name: Authenticate to DevHub
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS DEVHUB_SFDX_URL.txt SetAsDefaultDEVHUB
+
+      # Handle undeployable metadata against scratch orgs
+      - name: Handling of undeployable metadata
+        run: .deployment/scripts/orchastration_mb/pre-undeployableMetadata_scratchOrgs.sh SO_SUPPORTS_OMNI
+
+      # Create and setup Scratch org
+      - name: Create and setup Scratch org
+        run: .deployment/scripts/scratchOrgs/scratchOrgPrepForOrgSnapshot.sh SO_SNAPSHOT $ORG_ALIAS $SO_SNAPSHOT_SCOPE
+
+      # Create new org snapshop
+      - name: Recreate Org Snapshot based on created Scratch Org
+        run: .deployment/scripts/scratchOrgs/scratchOrgSnapshotCreation.sh SO_SNAPSHOT $ORG_ALIAS $SO_SNAPSHOT_SCOPE

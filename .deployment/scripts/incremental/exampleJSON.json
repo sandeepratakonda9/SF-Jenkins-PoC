@@ -1,0 +1,97 @@
+{
+    "packages": [
+        {
+            "packageName": "MB-FS-DM"
+        },
+        {
+            "packageName": "MB-FS-BL"
+        },
+        {
+            "packageName": "MB-FS-DM"
+        },
+        {
+            "packageName": "MB-FS-BL"
+        }
+    ]
+},
+{
+    "packages": [
+        {
+            "packageName": "MB-FS-DM"
+        },
+        {
+            "packageName": "MB-FS-BL"
+        },
+        {
+            "packageName": "MB-FS-DM",
+            "packageDIR": "fs_dm"
+        },
+        {
+            "packageName": "MB-FS-BL",
+            "packageDIR": "fs_bl"
+        }
+    ]
+},
+{
+    "packages": [
+        {
+            "packageName": "MB-FS-DM"
+        },
+        {
+            "packageName": "MB-FS-BL"
+        },
+        {
+            "packageName": "MB-FS-DM",
+            "packageDIR": "fs_dm",
+            "createdPackageVersionID": "04t8a000000uqL8AAI"
+        },
+        {
+            "packageName": "MB-FS-BL",
+            "packageDIR": "fs_bl",
+            "createdPackageVersionID": "04t8a000000uqL8AAI"
+        }
+    ]
+},
+
+
+{
+    "packages": [  
+        {  
+            "packageName": "ABC",
+            "packageDIR": ".core_bl",
+            "createdPackageVersionID": "null"
+        },
+        {  
+            "packageName": "DEF",
+            "packageDIR": ".core_bl",
+            "createdPackageVersionID": "null"
+        },
+        {  
+            "packageName": "GHI",
+            "packageDIR": ".core_bl",
+            "createdPackageVersionID": "null"
+        }
+    ]
+},
+{
+    "packages": [  
+        {  
+            "packageName": "ABC",
+            "packageDIR": ".core_bl",
+            "createdPackageVersionID": "null"
+        },
+        {  
+            "packageName": "DEF",
+            "packageDIR": ".core_bl",
+            "createdPackageVersionID": "null"
+        },
+        {  
+            "packageName": "GHI",
+            "packageDIR": ".core_bl",
+            "createdPackageVersionID": "null"
+        }
+    ]
+}
+
+
+.packages[0] += {"createdPackageVersionID":"04t8a000000uqL8AAI"}

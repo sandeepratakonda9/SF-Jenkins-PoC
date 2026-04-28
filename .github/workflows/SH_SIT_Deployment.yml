@@ -1,0 +1,72 @@
+name: 'CI: SIT - Scheduled full deploy'
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 0' # Every Sunday at 02:00 am
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true 
+  ORG_ALIAS: "MBM_SIT_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+  TESTRUN_ON_DEPLOYMENT: ${{ vars.SIT_TESTRUN_ON_DEPLOYMENT }}
+  TARGET_ORG_TYPE: "DEVOPSSANDBOX"
+  DEPLOY_OO_FOLDERS: "TRUE"
+  DEPLOY_OH_FOLDERS: "TRUE"
+  DEPLOY_CMP_FOLDERS: "TRUE"
+
+jobs:
+  deployToSIT:
+    name: "CI: Deploy to SIT"
+    runs-on: [self-hosted, aks-gha-runners]
+    environment: SIT
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI & sfdx-git-delta Plugin if needed 
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Handle irrelevant metadata against SIT org
+      - name: Handle irrelevant metadata
+        run: .deployment/scripts/orchastration_mb/pre-irrelevantMetadata_SIT.sh deployment
+      
+      # Store secret for SIT
+      - name: Populate auth file with SIT_SFDX_URL secret
+        run: echo ${{ secrets.SIT_SFDX_URL}} > ./SIT_SFDX_URL.txt
+      
+      # Authenticate to SIT
+      - name: Authenticate to SIT
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS SIT_SFDX_URL.txt SetDefault
+
+      # Deploy to SIT
+      - name: Deploy to SIT
+        run: | 
+          .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+          .deployment/scripts/deploySourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath fs_post_org-dependent/SIT
+          
+      # Send Teams notification in case of failure
+      # - name: Post Deployment Status to Teams
+      #   if: ${{ always() }}
+      #   run: |
+      #     if [ ${{ job.status }} == 'failure' ]; then
+      #       curl -X POST -H "Content-Type: application/json" -d '{
+      #         "text": "Scheduled SIT deployment for https://git.i.mercedes-benz.com/mbfs-OneOps/T1224-OneOPS has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
+      #         "themeColor": "FF0000"
+      #       }' $TEAMS_NOTIFICATIONS_WEBHOOK
+      #     fi

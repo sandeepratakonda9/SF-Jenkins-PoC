@@ -1,0 +1,57 @@
+name: 'TEST: Validate & deploy to specified Salesforce Org' 
+
+on:
+  workflow_dispatch:
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true
+  ORG_ALIAS: "MBM_TARGET_ORG_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  ORG_DEPLOYMENT_TESTRUN: ${{ vars.TEST_ORG_DEPLOYMENT_TESTRUN }}
+  ORG_TYPE: ${{ vars.TEST_ORG_TYPE }}
+  ORG_VALIDATE_OR_DEPLOY: ${{ vars.TEST_ORG_VALIDATE_OR_DEPLOY }}
+
+jobs:
+  deployToTARGET_ORG:
+    runs-on: [self-hosted, aks-gha-runners]
+    environment: Specified-ORG
+    name: "Validate or Deploy to specified Org"
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts 
+          sf --version
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh && chmod +x .deployment/scripts/releaseManager/*.sh && chmod +x .deployment/scripts/scratchOrgs/*.sh
+      
+      # Store secret for TARGET_ORG
+      - name: Populate auth file with TARGET_ORG_SFDX_URL secret
+        run: echo ${{ secrets.TEST_ORG_SFDX_URL}} > ./TARGET_ORG_SFDX_URL.txt
+      
+      # Authenticate to TARGET_ORG
+      - name: Authenticate to specified Org
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS TARGET_ORG_SFDX_URL.txt SetDefault
+
+      # Validate or Deploy to TARGET_ORG
+      - name: Validate or Deploy to specified Org
+        run: |
+          if [ $ORG_VALIDATE_OR_DEPLOY == 'validate' ]; then
+            echo "--- Starting VALIDATION ---"
+            .deployment/scripts/releaseManager/ohCOPOrgValidation.sh
+            .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $ORG_DEPLOYMENT_TESTRUN sourcepath ./
+          else
+            echo "--- Starting DEPLOYMENT ---"
+            .deployment/scripts/releaseManager/ohCOPOrgValidation.sh
+            .deployment/scripts/orchastration_mb/deploy-dir-structure.sh $ORG_ALIAS $TARGET_ORG_TYPE $DEPLOY_OO_FOLDERS $DEPLOY_OH_FOLDERS $DEPLOY_CMP_FOLDERS
+          fi

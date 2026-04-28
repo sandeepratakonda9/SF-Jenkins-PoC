@@ -1,0 +1,58 @@
+@Library('dot-shared-lib@master') _
+pipeline {
+
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+    }
+
+    environment {
+        PROJECT_NAME = 'T1224-OneOPS'
+        PROJECT_TEAM = 'myteam'
+        REGISTRY = 'registry.app.corpintra.net'
+        SONAR_CREDENTIALS = 'pid5309-sonar-token'
+        SONAR_HOST = 'https://dfscto-sonar.dot.i.mercedes-benz.com'
+        AUTH_FILE = credentials('FS_PROD_CI_AUTHFILE')
+        API_VERSION = credentials('API_VERSION')
+        INSTALLATIONKEY = credentials('INSTALLATION_KEY')
+        SFDX_DISABLE_DNS_CHECK = true 
+    }
+
+    agent any
+
+    stages {
+        stage('Set Up Environment') {
+            steps {
+                setEnv(enableStatistics: false)
+            }
+        }
+        stage('PR review: Scratch Org validation') {
+            agent {
+                docker {
+                alwaysPull true
+                image 'registry.app.corpintra.net/dmo/docker-salesforce:7.188.2'
+                args '-u root'
+                reuseNode true
+                }
+            }
+            steps {
+                    sh "chmod +x .deployment/scripts/*.sh"
+                    sh ".deployment/scripts/configSetAPIVersion.sh $API_VERSION"
+                    sh ".deployment/scripts/authenticationSFDXURL.sh FS_PROD $AUTH_FILE SetAsDefaultDEVHUB"
+                    sh "sfdx sfpowerscripts:orchestrator:validate --pools=MBM-SO-Pool-CI --targetdevhubusername=FS_PROD"
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+            dir("${env.WORKSPACE}@tmp") {
+                deleteDir()
+            }
+        }
+    }
+
+}

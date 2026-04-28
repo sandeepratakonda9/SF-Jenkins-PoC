@@ -1,0 +1,155 @@
+name: "Pull Requests: devINT validation & deployment"
+
+on:
+  pull_request:
+    types:
+      - labeled
+
+env:
+  SFDX_DISABLE_DNS_CHECK: true
+  ORG_ALIAS: "MBM_devINT_CI"
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  DEVINT_VALIDATION_STYLE: ${{ vars.DEVINT_VALIDATION_STYLE }}
+  TESTRUN_ON_DEPLOYMENT: ${{ vars.DEVINT_TESTRUN_ON_DEPLOYMENT }}
+  DEVINT_DEPLOYMENT: ${{ vars.DEVINT_DEPLOYMENT }}
+
+jobs:
+  validateAgainstDevINT:
+    name: devINT Validation
+    runs-on: [self-hosted, aks-gha-runners]
+    if: github.event.label.name == 'integration-dependency' || github.event.label.name == 'devINT Review'
+    
+    steps:
+      # Checkout the code
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      # Setup Node.js
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Install Salesforce CLI
+      - name: Install Salesforce CLI
+        run: |
+          sudo npm install --global @salesforce/cli@$SALESFORCE_CLI_VERSION --ignore-scripts
+          sf --version
+          if [ "$DEVINT_VALIDATION_STYLE" == 'delta' ]; then
+            echo 'y' | sf plugins install sfdx-git-delta
+          fi
+ 
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Handle irrelevant metadata against devINT org
+      - name: Handle irrelevant metadata
+        run: .deployment/scripts/orchastration_mb/pre-irrelevantMetadata_SIT.sh validation
+
+      # Store secret for devINT
+      - name: Populate auth file with DEVINT_SFDX_URL secret
+        run: echo ${{ secrets.DEVINT_SFDX_URL }} > ./DEVINT_SFDX_URL.txt
+
+      # Authenticate to devINT
+      - name: Authenticate to devINT
+        run: .deployment/scripts/authenticationSFDXURL.sh $ORG_ALIAS DEVINT_SFDX_URL.txt SetDefault
+
+      # Validate against DevINT
+      - name: Validate against DevINT
+        id: deploy
+        run: |
+          set -o pipefail
+          {
+              if [ "$DEVINT_VALIDATION_STYLE" == 'delta' ]; then
+              mkdir ./temp-delta-deployment
+              echo "Validating delta changes from 'develop' to 'HEAD'..."
+              sf sgd source delta --from "origin/develop" --to "HEAD" --output-dir ./temp-delta-deployment --generate-delta --ignore-file .sgdeltaignore
+              ls -R -l ./temp-delta-deployment
+              RELEVANT_DIR_CHANGED=$(.deployment/scripts/orchastration_mb/checkChangedDirectories.sh)
+              if [ "$RELEVANT_DIR_CHANGED" == 'TRUE' ]; then
+                .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./temp-delta-deployment ${{ github.token }} ${{ github.event.pull_request.number }}
+              else
+                .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./ ${{ github.token }} ${{ github.event.pull_request.number }}
+              fi
+              else
+                .deployment/scripts/validateSourceFormat.sh $ORG_ALIAS $TESTRUN_ON_DEPLOYMENT sourcepath ./ ${{ github.token }} ${{ github.event.pull_request.number }}
+              fi
+          } 2>&1 | tee deploy.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Deployment validation failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+      - name: Upload validation log
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: deploy-log
+          path: deploy.log
+          
+  deployToDevINT:
+    name: "devINT Deployment"
+    needs: [validateAgainstDevINT]
+    uses: ./.github/workflows/PR_Deployment_DevINT.yml
+    secrets: inherit
+
+  postStatusToPR:
+    name: Post Status to PR
+    needs: [validateAgainstDevINT, deployToDevINT]
+    runs-on: [self-hosted, aks-gha-runners]
+    if: ${{ needs.validateAgainstDevINT.result != 'skipped' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Post comment based on job results
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const validationResult = "${{ needs.validateAgainstDevINT.result }}";
+            const deploymentResult = "${{ needs.deployToDevINT.result }}";
+
+            let message = "";
+
+            if (validationResult === "failure") {
+              message = "❌ **Validation against devINT Failed**\n\n";
+              message += "Deployment was not triggered.\n\n";
+              message += "Please review the validation job logs for errors.";
+            } else if (validationResult === "success" && deploymentResult === "failure") {
+              message = "✅ **Validation against devINT Succeeded**\n\n";
+              message += "❌ **Deployment to devINT Failed**\n\n";
+              message += "Please review the deployment job logs for errors.";
+            } else if (validationResult === "success" && deploymentResult === "success") {
+              message = "✅ **DevINT Validation & Deployment Successful!**\n\n";
+              message += "Your changes have been successfully validated and deployed to devINT.\n\n";
+              message += "🎉 Ready for testing in devINT!";
+            }
+
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            message += `\n\n🔗 [View workflow run](${runUrl})`;
+
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+
+
+# Capture DORA deployment metrics (success/failure) and report to Datadog
+  Datadog-Report:
+    name: "Call Datadog Reporting"
+    needs:
+      - validateAgainstDevINT
+      - deployToDevINT
+      - postStatusToPR
+    if: ${{ always() }}
+    uses: ./.github/workflows/Datadog_Report.yml
+    with:
+      deployment_status: ${{ needs.deployToDevINT.result == 'success' && 'success' || 'failure' }}
+      environment: "devINT"
+    secrets: inherit

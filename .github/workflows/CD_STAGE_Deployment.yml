@@ -1,0 +1,59 @@
+name: 'CD: STAGE - Deployment' 
+
+on:
+  push:
+   branches: [ "stage" ]
+
+env:
+  INSTALLATIONKEY: ${{ secrets.INSTALLATIONKEY }}
+  SFDX_DISABLE_DNS_CHECK: true 
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  FROM_BRANCH: ${{ vars.FROM_BRANCH }}
+  TO_BRANCH: ${{ vars.TO_BRANCH }}
+
+jobs:
+  deployToSTAGE:
+    runs-on: [self-hosted, aks-gha-runners]
+    environment: STAGE
+
+    steps:
+      - uses: actions/checkout@v3
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: sudo npm install --global @salesforce/cli@${SALESFORCE_CLI_V2_VERSION} --ignore-scripts
+
+      # Store secret for STAGE
+      - name: Populate auth file with STAGE_SFDX_URL secret
+        run: echo ${{ secrets.STAGE_SFDX_URL}} > ./STAGE_SFDX_URL.txt
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+      
+      # Authenticate to STAGE
+      - name: Authenticate to STAGE
+        run: .deployment/scripts/authenticationSFDXURL.sh FS_STAGE STAGE_SFDX_URL.txt SetDefault
+      
+      # Deploy to STAGE
+      - name: Deploy to STAGE
+        run: .deployment/scripts/orchastration_mb/deploy-dir-structure.sh FS_STAGE RunLocalTests
+         # .deployment/scripts/orchastration_mb/post-deployment_STAGE.sh FS_STAGE RunLocalTests - avoid overriting of quicklinks for the moment
+
+      # Send Teams notification
+      - name: Post Deployment Status to Teams
+        if: ${{ always() }}
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            curl -X POST -H "Content-Type: application/json" -d '{
+            "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
+            "themeColor": "0ed700"
+            }' https://corpdir.webhook.office.com/webhookb2/34e9e84f-38a4-4b38-92f7-e995cefe314e@9652d7c2-1ccf-4940-8151-4a92bd474ed0/IncomingWebhook/8b6fc6e571ec499992a88fd996cf0222/92ca7124-e908-4274-9092-af7093f08545
+          else
+            curl -X POST -H "Content-Type: application/json" -d '{
+              "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
+              "themeColor": "FF0000"
+            }' https://corpdir.webhook.office.com/webhookb2/34e9e84f-38a4-4b38-92f7-e995cefe314e@9652d7c2-1ccf-4940-8151-4a92bd474ed0/IncomingWebhook/8b6fc6e571ec499992a88fd996cf0222/92ca7124-e908-4274-9092-af7093f08545
+          fi
+
+      

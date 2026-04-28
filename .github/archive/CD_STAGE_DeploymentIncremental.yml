@@ -1,0 +1,99 @@
+name: 'CD: STAGE - Deployment Incremental' 
+
+on:
+  workflow_dispatch:
+
+env:
+  INSTALLATIONKEY: ${{ secrets.INSTALLATIONKEY }}
+  SFDX_DISABLE_DNS_CHECK: true 
+  SALESFORCE_CLI_VERSION: ${{ vars.SALESFORCE_CLI_VERSION }}
+  FROM_BRANCH: ${{ vars.FROM_BRANCH }}
+  TO_BRANCH: ${{ vars.TO_BRANCH }}
+  TEAMS_NOTIFICATIONS_WEBHOOK: ${{ secrets.TEAMS_NOTIFICATIONS_WEBHOOK }}
+
+jobs:
+  deployToSTAGE:
+    runs-on: [self-hosted, aks-gha-runners]
+    environment: STAGE
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - id: setup-node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      # Temp merge of develop into stage without push
+      - name: merge develop into stage branch
+        run: |
+          git switch stage
+          git merge origin/develop --ff-only
+
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          sudo npm install --global @salesforce/cli@${SALESFORCE_CLI_V2_VERSION} --ignore-scripts
+          sf --version
+
+      # Store secret for DevHub
+      - name: Populate auth file with DevHub_SFDX_URL secret
+        run: echo ${{ secrets.DEVHUB_SFDX_URL}} > ./DEVHUB_SFDX_URL.txt
+
+      # Store secret for STAGE
+      - name: Populate auth file with STAGE_SFDX_URL secret
+        run: echo ${{ secrets.STAGE_SFDX_URL}} > ./STAGE_SFDX_URL.txt
+
+      # Make scripts executable
+      - name: Make scripts executable
+        run: chmod +x .deployment/scripts/*.sh && chmod +x .deployment/scripts/orchastration_mb/*.sh
+
+      # Authenticate to DevHub
+      - name: Authenticate to DevHub
+        run: .deployment/scripts/authenticationSFDXURL.sh FS_DevHub DEVHUB_SFDX_URL.txt SetAsDefaultDEVHUB
+      
+      # Authenticate to STAGE
+      - name: Authenticate to STAGE
+        run: .deployment/scripts/authenticationSFDXURL.sh FS_STAGE STAGE_SFDX_URL.txt SetDefault
+
+      # Run Pre-deployment to STAGE
+      - name: Run Pre-deployment to STAGE
+        run: .deployment/scripts/orchastration_mb/pre-deployment_fs.sh FS_STAGE RunLocalTests
+      
+      # Run Incremental Package version creation and installation to STAGE
+      - name: Run Incremental Package version creation and installation to STAGE
+        run: |
+          git fetch 
+          .deployment/scripts/orchastration_mb/packagingIncremental.sh $FROM_BRANCH $TO_BRANCH FS_DevHub FS_STAGE $INSTALLATIONKEY
+      
+      # Run Post-deployments STAGE
+      - name: Post-deployments to STAGE
+        run: |
+          .deployment/scripts/orchastration_mb/post-deployment_core.sh FS_STAGE RunLocalTests
+          .deployment/scripts/orchastration_mb/post-deployment_com.sh FS_STAGE RunLocalTests
+          .deployment/scripts/orchastration_mb/post-deployment_fs.sh FS_STAGE RunLocalTests
+         # .deployment/scripts/orchastration_mb/post-deployment_STAGE.sh FS_STAGE RunLocalTests - avoid overriting of quicklinks for the moment
+
+      # Update stage remote branch
+      - name: Update stage remote branch
+        run: git push
+
+      # Send Teams notification
+      - name: Post Deployment Status to Teams
+        if: ${{ always() }}
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            curl -X POST -H "Content-Type: application/json" -d '{
+            "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT SUCCESSFUL. Job Status: ${{ job.status }}",
+            "themeColor": "0ed700"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          else
+            curl -X POST -H "Content-Type: application/json" -d '{
+              "text": "STAGE: Salesforce deployment to STAGE org has completed: DEPLOYMENT FAILED. Job Status: ${{ job.status }}",
+              "themeColor": "FF0000"
+            }' $TEAMS_NOTIFICATIONS_WEBHOOK
+          fi
+
+      
