@@ -17,26 +17,26 @@ echo "Your current Pull Request title is: " "$PR_TITLE"
 BRANCH_NAME=$GITHUB_HEAD_REF
 echo "Your current Branch name is: " $BRANCH_NAME
 
-# Generic naming conventions:
-# - Branch: team-or-scope/TICKET-1234...
-# - PR: [DO NOT MERGE] optional, then same prefix and a title.
-EXPECTED_BRANCH_FORMAT='^[a-zA-Z0-9._-]+/[A-Z][A-Z0-9]+-[0-9]+([/_-].*)?$'
-EXPECTED_PR_FORMAT='^(\[DO NOT MERGE\]\s*)?[a-zA-Z0-9._-]+/[A-Z][A-Z0-9]+-[0-9]+(\s+.+)?$'
+# Supported formats:
+# 1) Jira-style (strict): team/JiraKey-1234...
+# 2) Demo-friendly gitflow-style branches: feature/*, bugfix/*, hotfix/*, chore/*, release/*
+STRICT_BRANCH_FORMAT='^[a-zA-Z0-9._-]+/[A-Z][A-Z0-9]+-[0-9]+([/_-].*)?$'
+DEMO_BRANCH_FORMAT='^(feature|bugfix|hotfix|chore|release)/[a-zA-Z0-9._/-]+$'
 
-# Check if the pull request title matches the expected format
-if [[ ! $PR_TITLE =~ $EXPECTED_PR_FORMAT ]]; then
-  echo "error: Pull request title does not match expected format ([DO NOT MERGE] team/JiraKey-1234 Optional title)"
+# Basic PR title requirement for demo: non-empty, minimum 8 chars.
+if [[ -z "${PR_TITLE// }" ]] || [[ ${#PR_TITLE} -lt 8 ]]; then
+  echo "error: Pull request title must be at least 8 characters."
   exit 1
 else
-  echo "Pull request title is in the correct format"
+  echo "Pull request title is valid"
 fi
 
-# Check if the branch name matches the expected format
-if [[ ! $BRANCH_NAME =~ $EXPECTED_BRANCH_FORMAT ]]; then
-  echo "error: Branch name does not match expected format (team/JiraKey-1234)"
-  exit 1
+# Branch name can satisfy either strict Jira format or demo gitflow format.
+if [[ $BRANCH_NAME =~ $STRICT_BRANCH_FORMAT ]] || [[ $BRANCH_NAME =~ $DEMO_BRANCH_FORMAT ]]; then
+  echo "Branch name is valid"
 else
-  echo "Branch name is in the correct format"
+  echo "error: Branch name must match either 'team/JiraKey-1234' or 'feature|bugfix|hotfix|chore|release/<name>'."
+  exit 1
 fi
 
 exit 0
