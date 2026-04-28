@@ -14,7 +14,7 @@ env:
 jobs:
   validateAgainstPreProd:
     name: "Validate against PreProd"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     environment: PREPROD
     continue-on-error: true
 
@@ -70,7 +70,7 @@ jobs:
 
   validateAgainstProd:
     name: "Validate against PROD"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     needs: validateAgainstPreProd
     environment: PROD
 

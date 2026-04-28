@@ -15,7 +15,7 @@ env:
 
 jobs:
   deployToTARGET_ORG:
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     environment: Specified-ORG
     name: "Validate or Deploy to specified Org"
 

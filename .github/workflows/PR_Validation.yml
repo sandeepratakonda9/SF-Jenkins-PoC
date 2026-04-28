@@ -34,7 +34,7 @@ env:
 jobs:
   validateAgainstSIT:
     name: SIT dry-run
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     # Job-level concurrency: Only one SIT validation per PR at a time
     concurrency:
       group: sit-validation-${{ inputs.pr_number }}
@@ -137,7 +137,7 @@ jobs:
 
   validateAgainstScratchOrg:
     name: Scratch Org dry-run
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     if: ${{ inputs.run_scratch_org_validation }}
     # Job-level concurrency: Only one Scratch Org validation per PR at a time
     concurrency:

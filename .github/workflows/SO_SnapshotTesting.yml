@@ -12,7 +12,7 @@ env:
 
 jobs:
   recreateScratchOrgSnapshot:
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     name: "Create Scratch Org Snapshot"
 
     steps:

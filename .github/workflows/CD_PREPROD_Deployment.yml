@@ -18,7 +18,7 @@ env:
 jobs:
   deployToPREPROD:
     name: "Deploy to PREPROD"
-    runs-on: [self-hosted, aks-gha-runners]
+    runs-on: ubuntu-latest
     environment: PREPROD
 
     steps:
