@@ -1,0 +1,22 @@
+<template>
+  <div class="slds-grid slds-wrap">
+    <div class="slds-col slds-size_1-of-2">
+      <lightning-textarea
+        label="Text 1"
+        value={value1}
+        onchange={handleInput1}
+        class="slds-textarea"
+        placeholder="Enter text to compare"
+      ></lightning-textarea>
+    </div>
+    <div class="slds-col slds-size_1-of-2">
+      <lightning-textarea
+        label="Text 2"
+        value={value2}
+        onchange={handleInput2}
+        class="slds-textarea"
+        placeholder="Enter text to compare"
+      ></lightning-textarea>
+    </div>
+  </div>
+</template>

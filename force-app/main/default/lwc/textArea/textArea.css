@@ -1,0 +1,12 @@
+:host {
+  --border-color: var(--secondary-color);
+  --light-bg-color: var(--dark-bg-color);
+  --font-color: #fff;
+}
+
+.slds-textarea {
+  border: 1px solid var(--border-color);
+  padding: 10px;
+  background-color: var(--light-bg-color);
+  color: var(--font-color);
+}

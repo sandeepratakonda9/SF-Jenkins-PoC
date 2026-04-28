@@ -1,0 +1,12 @@
+:host {
+  --primary-color: #0088ce;
+  --border-color: #dddddd;
+  --dark-bg-color: #1a1a1a;
+  --font-color: #fff;
+}
+
+.slds-summary-box {
+  border: 1px solid var(--border-color);
+  background-color: var(--dark-bg-color);
+  color: var(--font-color);
+}
